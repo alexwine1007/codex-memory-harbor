@@ -30,6 +30,8 @@ class HarborTests(unittest.TestCase):
         readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
         self.assertIn('name = "memory-harbor"', metadata)
         self.assertEqual(readme.splitlines()[0], "# Memory Harbor")
+        self.assertIn("canonical checkout directory is `memory-harbor`", readme)
+        self.assertIn("`codex-memory-harbor` compatibility symlink", readme)
 
     def fixture(self, root: Path, child=True, complete=True):
         path = root / "sessions/2026/01/01/rollout-test.jsonl"; path.parent.mkdir(parents=True)

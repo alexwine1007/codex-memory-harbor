@@ -127,6 +127,10 @@ open "dist/Memory Harbor.app"
 
 The app expects the Skill at `~/.codex/skills/codex-memory-harbor`. Set `CODEX_HARBOR_SCRIPT` to override that path.
 
+The canonical checkout directory is `memory-harbor`. An existing Codex project may keep
+using a `codex-memory-harbor` compatibility symlink that resolves to the canonical checkout;
+this preserves saved project and task paths without duplicating the repository.
+
 ### Install the desktop companion
 
 ```bash
