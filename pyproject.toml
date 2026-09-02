@@ -1,0 +1,16 @@
+[project]
+name = "codex-memory-harbor"
+version = "0.1.0b1"
+description = "Safely dock old Codex child-task session logs on external storage"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+authors = [{name = "Alex Solar"}]
+keywords = ["codex", "macos", "session", "archive", "external-drive"]
+
+[project.urls]
+Homepage = "https://github.com/alexwine1007/codex-memory-harbor"
+Repository = "https://github.com/alexwine1007/codex-memory-harbor"
+
+[tool.setuptools]
+py-modules = []

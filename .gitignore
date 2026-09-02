@@ -1,0 +1,7 @@
+.DS_Store
+__pycache__/
+*.pyc
+dist/
+.harbor-test/
+*.offload-local-backup
+offload_manifest.jsonl

@@ -1,0 +1,9 @@
+interface:
+  display_name: "Codex Memory Harbor"
+  short_description: "Dock old Codex child-task logs safely"
+  icon_small: "./assets/icon-small.svg"
+  icon_large: "./assets/icon-large.svg"
+  brand_color: "#7C6CFF"
+  default_prompt: "Use $codex-memory-harbor to open the dashboard and safely inspect Codex session storage."
+policy:
+  allow_implicit_invocation: true

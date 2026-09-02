@@ -1,0 +1,18 @@
+#!/bin/zsh
+set -euo pipefail
+ROOT="${0:A:h:h}"
+APP="$ROOT/dist/Codex Memory Harbor.app"
+CONTENTS="$APP/Contents"
+mkdir -p "$CONTENTS/MacOS" "$CONTENTS/Resources"
+xcrun swiftc "$ROOT/macos/CodexMemoryHarbor.swift" -o "$CONTENTS/MacOS/CodexMemoryHarbor" -framework Cocoa -framework WebKit
+cp "$ROOT/skills/codex-memory-harbor/assets/icon-large.svg" "$CONTENTS/Resources/icon.svg"
+/usr/libexec/PlistBuddy -c 'Clear dict' "$CONTENTS/Info.plist" 2>/dev/null || true
+/usr/libexec/PlistBuddy -c 'Add :CFBundleName string Codex Memory Harbor' "$CONTENTS/Info.plist"
+/usr/libexec/PlistBuddy -c 'Add :CFBundleDisplayName string Codex Memory Harbor' "$CONTENTS/Info.plist"
+/usr/libexec/PlistBuddy -c 'Add :CFBundleIdentifier string com.alexsolar.codex-memory-harbor' "$CONTENTS/Info.plist"
+/usr/libexec/PlistBuddy -c 'Add :CFBundleVersion string 1' "$CONTENTS/Info.plist"
+/usr/libexec/PlistBuddy -c 'Add :CFBundleShortVersionString string 0.1.0-beta.1' "$CONTENTS/Info.plist"
+/usr/libexec/PlistBuddy -c 'Add :CFBundleExecutable string CodexMemoryHarbor' "$CONTENTS/Info.plist"
+/usr/libexec/PlistBuddy -c 'Add :LSMinimumSystemVersion string 13.0' "$CONTENTS/Info.plist"
+codesign --force --deep --sign - "$APP"
+echo "$APP"
