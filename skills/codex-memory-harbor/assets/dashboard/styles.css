@@ -9,10 +9,14 @@ header{display:flex;align-items:center;justify-content:space-between;margin-bott
 .brand{display:flex;align-items:center;gap:12px}
 .brand>div:last-child{display:flex;flex-direction:column;gap:3px}
 .brand b{font-size:16px}
-.brand span,.online span{font-size:12px;color:var(--muted)}
+.brand span{font-size:12px;color:var(--muted)}
 .mark{display:grid;place-items:center;width:42px;height:42px;border-radius:14px;background:linear-gradient(145deg,#343153,#171925);border:1px solid #8c7bff66;color:#cac5ff;font-size:28px}
-.online{display:flex;align-items:center;gap:8px}
-.online i{width:7px;height:7px;border-radius:50%;background:var(--m);box-shadow:0 0 12px var(--m)}
+.header-actions{display:flex;align-items:center;gap:10px}
+.drive-picker{display:flex;align-items:center;gap:10px;min-width:232px;padding:7px 11px;border:1px solid #ffffff13;border-radius:13px;background:linear-gradient(145deg,#1b1e2a,#151721);cursor:pointer}
+.drive-picker i{flex:0 0 auto;width:8px;height:8px;border-radius:50%;background:var(--m);box-shadow:0 0 12px var(--m)}
+.drive-picker>span{display:flex;flex:1;min-width:0;flex-direction:column;gap:1px}
+.drive-picker small{color:#9298aa;font-size:9px;letter-spacing:.5px}
+.drive-picker select{width:100%;border:0;outline:0;background:transparent;color:#f1f2f8;font-size:12px;font-weight:600;padding:0 20px 0 0;cursor:pointer}
 button,select,input,textarea{font:inherit;color:inherit}
 button{border:1px solid var(--line);background:#20222d;border-radius:10px;padding:9px 13px;cursor:pointer}
 button:hover{border-color:#746dcc}
@@ -34,6 +38,7 @@ button:disabled{opacity:.32;cursor:not-allowed}
 .panel-tools{display:flex;align-items:center;gap:12px}
 .sort-control{display:flex;align-items:center;gap:7px;color:var(--muted);font-size:11px}
 .sort-control select{height:32px;border:1px solid var(--line);border-radius:9px;background:#1c1e29;color:#e8e9f0;padding:0 28px 0 10px;font:inherit}
+.scan-button{height:32px;padding:0 10px;border-radius:9px;background:transparent;color:var(--muted);font-size:11px}
 h2{font-size:17px;margin:0}
 .panel-head p{margin:5px 0 0;color:var(--muted);font-size:12px}
 .tabs{display:flex;gap:5px}
@@ -54,13 +59,6 @@ h2{font-size:17px;margin:0}
 .empty{padding:48px;text-align:center;color:var(--muted)}
 .advanced{margin-top:13px;border:1px solid var(--line);border-radius:17px;background:#12141ddd}
 .advanced summary{cursor:pointer;padding:17px 19px;color:#b6bac8}
-.settings{display:grid;grid-template-columns:minmax(250px,1fr) minmax(300px,1.5fr) 112px;gap:16px;align-items:end;padding:3px 19px 20px}
-.settings label{display:grid;grid-template-rows:17px 44px;gap:7px;min-width:0;font-size:11px;color:var(--muted)}
-.settings select,.settings>button{width:100%;height:44px;margin:0;border:1px solid #ffffff14;background:#191b26;border-radius:12px;padding:0 13px}
-.settings select:focus{outline:none;border-color:#8171ff88;box-shadow:0 0 0 3px #8171ff12}
-.settings>p{align-self:end;margin:0 0 1px;color:var(--muted);font-size:11px;line-height:1.55}
-.settings>button{align-self:end;padding:0 15px;background:#20242d;color:#dfe2eb;font-weight:600;white-space:nowrap}
-.settings>button:hover{background:#292d38;border-color:#6f7190}
 .files{max-height:230px;overflow:auto;border-top:1px solid var(--line)}
 .file{display:grid;grid-template-columns:1fr 75px 70px 85px 82px;gap:9px;align-items:center;padding:10px 19px;border-bottom:1px solid #ffffff08;font-size:11px;color:var(--muted)}
 .file span:first-child{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -79,7 +77,8 @@ dialog form{display:flex;justify-content:flex-end;gap:8px;margin-top:20px}
 @media(max-width:780px){.summary{grid-template-columns:1fr 1fr}
 .panel-head{align-items:flex-start;gap:14px}
 .panel-tools{align-items:flex-end;flex-direction:column}
-.settings{grid-template-columns:1fr}
+.header-actions{gap:7px}
+.drive-picker{min-width:190px}
 .project{grid-template-columns:28px 1fr 80px 38px}
 .project>*:nth-child(4),.project>*:nth-child(5){display:none}
 .hero strong{font-size:54px}
