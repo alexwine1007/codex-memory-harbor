@@ -24,11 +24,11 @@ function groups(){
     if(item.eligible)group.eligible+=item.logical;if(item.linked)group.linked+=item.logical;if(item.protected_project)group.protected=true;
     map.set(key,group);
   }
-  const amount=group=>filter==='linked'?group.linked:filter==='eligible'?group.eligible:group.size;
+  const amount=group=>filter==='linked'?group.linked:filter==='recommended'?group.items.filter(item=>selected.has(item.path)).reduce((sum,item)=>sum+item.logical,0):filter==='eligible'?group.eligible:group.size;
   return[...map.values()].sort((a,b)=>sortBy==='recent'?a.recentDays-b.recentDays||amount(b)-amount(a):amount(b)-amount(a)||a.recentDays-b.recentDays);
 }
-function visible(group){return filter==='all'||filter==='eligible'&&(group.items.some(item=>item.eligible)||pinnedInView.has(group.key))||filter==='linked'&&group.items.some(item=>item.linked)}
-function groupPaths(group){return group.items.filter(item=>filter==='linked'?item.linked:item.eligible).map(item=>item.path)}
+function visible(group){return filter==='all'||filter==='eligible'&&(group.items.some(item=>item.eligible)||pinnedInView.has(group.key))||filter==='recommended'&&group.items.some(item=>item.eligible&&selected.has(item.path))||filter==='linked'&&group.items.some(item=>item.linked)}
+function groupPaths(group){return group.items.filter(item=>filter==='linked'?item.linked:filter==='recommended'?item.eligible&&selected.has(item.path):item.eligible).map(item=>item.path)}
 
 function storageTargets(volumes){
   return [
@@ -71,13 +71,15 @@ function renderProjects(){
   let projectGroups=groups().filter(visible);
   if(frozenProjectOrder){const rank=new Map(frozenProjectOrder.map((key,index)=>[key,index]));projectGroups.sort((a,b)=>(rank.get(a.key)??1e9)-(rank.get(b.key)??1e9))}
   $('#projects').innerHTML=projectGroups.length?projectGroups.map(group=>{
-    const paths=groupPaths(group),checked=paths.length&&paths.every(path=>selected.has(path));
-    const amount=filter==='linked'?group.linked:filter==='eligible'?group.eligible:group.size;
+    const paths=groupPaths(group),eligiblePaths=group.items.filter(item=>item.eligible).map(item=>item.path),recommendedPaths=eligiblePaths.filter(path=>selected.has(path));
+    const checked=paths.length&&paths.every(path=>selected.has(path));
+    const amount=filter==='linked'?group.linked:filter==='recommended'?group.items.filter(item=>selected.has(item.path)).reduce((sum,item)=>sum+item.logical,0):filter==='eligible'?group.eligible:group.size;
     const direct=isProtectedProject(group.key),protectedOn=direct||group.protected;
-    const label=protectedOn?'长期保留':filter==='linked'?'已停泊':filter==='eligible'?'可整理':'项目';
+    const label=protectedOn?'长期保留':filter==='recommended'?`推荐 ${recommendedPaths.length} 项`:filter==='linked'?'已停泊':filter==='eligible'?'可整理':'项目';
     const activity=Number.isFinite(group.recentDays)?`${group.recentDays} 天前`:'未知';
-    return`<div class="project"><input type="checkbox" data-project="${esc(group.key)}" ${checked?'checked':''} ${paths.length?'':'disabled'}><div class="project-name"><b>${esc(group.name)}</b><span>${esc(group.key)}</span></div><span class="project-size">${fmt(amount)}</span><span class="project-count">${paths.length} 个 · ${activity}</span><span class="badge ${protectedOn?'bad':''}">${label}</span><button class="pin ${protectedOn?'on':''}" data-pin-project="${esc(group.key)}" title="${direct?'取消长期保留':protectedOn?'由同一真实路径保护':'长期保留项目'}" ${protectedOn&&!direct?'disabled':''}>${protectedOn?'★':'☆'}</button></div>`;
+    return`<div class="project ${recommendedPaths.length?'recommended':''}"><input type="checkbox" data-project="${esc(group.key)}" data-partial="${recommendedPaths.length>0&&recommendedPaths.length<eligiblePaths.length?'true':'false'}" ${checked?'checked':''} ${paths.length?'':'disabled'}><div class="project-name"><b>${esc(group.name)}</b><span>${esc(group.key)}</span></div><span class="project-size">${fmt(amount)}</span><span class="project-count">${filter==='recommended'?recommendedPaths.length:paths.length} 个 · ${activity}</span><span class="badge ${protectedOn?'bad':''}">${label}</span><button class="pin ${protectedOn?'on':''}" data-pin-project="${esc(group.key)}" title="${direct?'取消长期保留':protectedOn?'由同一真实路径保护':'长期保留项目'}" ${protectedOn&&!direct?'disabled':''}>${protectedOn?'★':'☆'}</button></div>`;
   }).join(''):'<div class="empty">这里暂时没有项目</div>';
+  document.querySelectorAll('[data-partial="true"]').forEach(control=>control.indeterminate=true);
   document.querySelectorAll('[data-project]').forEach(control=>control.onchange=()=>{const group=groups().find(item=>item.key===control.dataset.project);for(const path of groupPaths(group))control.checked?selected.add(path):selected.delete(path);planned=false;$('#offload').disabled=true;renderProjects();updateSelection()});
   document.querySelectorAll('[data-pin-project]').forEach(button=>button.onclick=async()=>{try{if(!frozenProjectOrder)frozenProjectOrder=groups().filter(visible).map(group=>group.key);pinnedInView.add(button.dataset.pinProject);const enabled=!isProtectedProject(button.dataset.pinProject);const response=await post('/api/protect',{scope:'project',value:button.dataset.pinProject,enabled});config={...config,...response.settings};for(const item of data.sessions)if(item.cwd===button.dataset.pinProject)selected.delete(item.path);await refresh(false);toast(enabled?'项目已设为长期保留':'已取消项目保留')}catch(error){toast(error.message,true)}});
 }
@@ -102,7 +104,7 @@ function recommendedItems(){
 }
 function selectRecommended(){
   selected.clear();for(const item of recommendedItems())selected.add(item.path);
-  filter='eligible';document.querySelectorAll('[data-filter]').forEach(button=>button.classList.toggle('active',button.dataset.filter==='eligible'));
+  filter='recommended';$('#recommendedTab').hidden=false;document.querySelectorAll('[data-filter]').forEach(button=>button.classList.toggle('active',button.dataset.filter==='recommended'));
   renderProjects();updateSelection();return data.sessions.filter(item=>selected.has(item.path));
 }
 function setProgress(completed,total,bytes,totalBytes,stage){$('#progressCount').textContent=`${completed} / ${total}`;$('#progressBytes').textContent=`${fmt(bytes)} / ${fmt(totalBytes)}`;$('#progressFill').style.width=(total?completed/total*100:0)+'%';$('#progressStage').textContent=stage}
@@ -119,7 +121,7 @@ async function executeMigration(items){
 $('#compact').onclick=()=>location.href='harbor://compact';
 $('#refresh').onclick=()=>refresh(true);
 $('#sortBy').onchange=()=>{sortBy=$('#sortBy').value;frozenProjectOrder=null;pinnedInView.clear();renderProjects()};
-document.querySelectorAll('[data-filter]').forEach(button=>button.onclick=()=>{document.querySelectorAll('[data-filter]').forEach(item=>item.classList.remove('active'));button.classList.add('active');filter=button.dataset.filter;frozenProjectOrder=null;pinnedInView.clear();selected.clear();planned=false;$('#offload').disabled=true;renderProjects();updateSelection()});
+document.querySelectorAll('[data-filter]').forEach(button=>button.onclick=()=>{document.querySelectorAll('[data-filter]').forEach(item=>item.classList.remove('active'));button.classList.add('active');filter=button.dataset.filter;frozenProjectOrder=null;pinnedInView.clear();if(filter!=='recommended'){selected.clear();$('#recommendedTab').hidden=true}planned=false;$('#offload').disabled=true;renderProjects();updateSelection()});
 $('#selectAll').onclick=()=>{const items=selectRecommended();toast(items.length?`已推荐 ${items.length} 个安全候选，可逐项调整`:'暂时没有符合条件的候选')};
 $('#optimize').onclick=async()=>{try{if(!$('#volume').value)throw Error('请先连接并选择一个可写外置盘');const items=selectRecommended();if(!items.length)throw Error('暂时没有符合 30 天安全条件的已完成子任务');const plan=await post('/api/plan',base(items.map(item=>item.path)));const total=plan.results.reduce((sum,item)=>sum+item.bytes,0);if(!await ask('一键优化 · 本轮安全批次',`<p>推荐 <b>${items.length}</b> 个已完成子任务，共 <b>${fmt(total)}</b>。为便于验证，当前测试版每轮最多 25 项 / 5 GB。</p><p>将逐条复制、哈希校验并建立透明链接；本地回滚不会自动删除。</p>`))return;await executeMigration(items)}catch(error){toast(error.message,true)}};
 $('#plan').onclick=async()=>{try{const response=await post('/api/plan',base());const total=response.results.reduce((sum,item)=>sum+item.bytes,0);if(await ask('整理方案预演',`<p>共 <b>${response.results.length}</b> 个子任务、<b>${fmt(total)}</b>。将先复制和哈希校验，内盘回滚仍保留。</p><div class="plan-list">${response.results.map(item=>`<div>${esc(item.source)}<br>→ ${esc(item.destination)}</div>`).join('')}</div>`)){planned=true;$('#offload').disabled=false;toast('预演通过，已解锁迁移')}}catch(error){toast(error.message,true)}};

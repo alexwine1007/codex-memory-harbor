@@ -59,6 +59,7 @@ h2{font-size:17px;margin:0}
 .projects{max-height:410px;overflow:auto;padding:8px}
 .project{display:grid;grid-template-columns:34px minmax(210px,1.4fr) .55fr .5fr 85px 42px;gap:12px;align-items:center;padding:15px;border-radius:14px}
 .project:hover{background:#ffffff05}
+.project.recommended{background:linear-gradient(90deg,#8171ff13,#4bd8ca08);box-shadow:inset 3px 0 0 #8171ff}
 .project input{accent-color:var(--v)}
 .project-name b,.project-name span{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .project-name span{font-size:11px;color:var(--muted);margin-top:4px}
