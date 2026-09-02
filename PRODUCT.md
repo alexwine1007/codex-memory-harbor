@@ -27,6 +27,21 @@ The button ranks eligible history using both size and inactivity. The beta safet
 capped at 25 files or 5 GB, stops on the first error, and never releases rollback copies.
 The user may adjust the recommendation before migration or repeat a verified batch.
 
+## Information architecture
+
+The organizer is one tree, not separate project and file inspectors:
+
+`Codex storage -> saved project -> task session file`
+
+Project membership comes from Codex's local project and task-assignment metadata. A task
+without a saved-project assignment appears under a visibly distinct `Unclassified tasks`
+branch even when its session metadata contains a working directory. Expanding a project
+shows its individual session files, size, age, protection state, and task-level pin. Parent
+checkboxes use mixed state when only some children are selected.
+
+The scanner reads project assignment metadata, timestamps, paths, sizes, completion events,
+and session identifiers. It does not read or index conversation message bodies.
+
 ## Storage provider boundary
 
 The API accepts a `storage_target` with `provider` and `location` fields. Version 0.2 ships

@@ -45,6 +45,19 @@ class HarborTests(unittest.TestCase):
         self.assertFalse(cloud["available"])
         with self.assertRaises(harbor.HarborError):
             harbor.resolve_storage_target({"storage_target":{"provider":"cloud","location":"memory-harbor://future"}})
+    def test_scan_uses_codex_project_assignments_and_preserves_projectless(self):
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d); self.fixture(root)
+            state={
+                "local-projects":{"project-1":{"name":"Example Project","rootPaths":["/tmp/example"]}},
+                "thread-project-assignments":{"parent-1":{"projectKind":"local","projectId":"project-1"}},
+                "projectless-thread-ids":[],
+            }
+            (root/".codex-global-state.json").write_text(json.dumps(state))
+            item=harbor.scan(root,14)["sessions"][0]
+            self.assertEqual(item["project_id"],"project-1")
+            self.assertEqual(item["project_name"],"Example Project")
+            self.assertFalse(item["projectless"])
     def test_offload_audit_finalize_restore_cycle(self):
         with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as v:
             root=Path(d); p=self.fixture(root); volume=Path(v)

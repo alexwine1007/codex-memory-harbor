@@ -20,7 +20,7 @@ import urllib.parse
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "0.2.0-beta.1"
+VERSION = "0.2.1-beta.1"
 DEFAULT_ARCHIVE = "Codex Memory Harbor"
 
 
@@ -199,6 +199,61 @@ def available_storage_targets() -> list[dict]:
     return targets
 
 
+def load_project_catalog(codex_home: Path) -> dict:
+    """Read Codex's local project assignment metadata, never conversation bodies."""
+    empty = {"projects": {}, "assignments": {}, "projectless": set()}
+    state_path = codex_home / ".codex-global-state.json"
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return empty
+    raw_projects = state.get("local-projects") or {}
+    projects = {}
+    if isinstance(raw_projects, dict):
+        for project_id, value in raw_projects.items():
+            if not isinstance(value, dict):
+                continue
+            roots = [str(path) for path in value.get("rootPaths") or [] if path]
+            projects[str(project_id)] = {
+                "id": str(project_id),
+                "name": str(value.get("name") or (Path(roots[0]).name if roots else "未命名项目")),
+                "roots": roots,
+            }
+    assignments = {}
+    raw_assignments = state.get("thread-project-assignments") or {}
+    if isinstance(raw_assignments, dict):
+        for thread_id, value in raw_assignments.items():
+            if isinstance(value, dict) and value.get("projectKind") == "local" and value.get("projectId"):
+                assignments[str(thread_id)] = str(value["projectId"])
+    projectless = {str(value) for value in (state.get("projectless-thread-ids") or []) if value}
+    return {"projects": projects, "assignments": assignments, "projectless": projectless}
+
+
+def attach_project(item: dict, catalog: dict) -> None:
+    thread_ids = [value for value in (item.get("id"), item.get("parent_id")) if value]
+    project_id = next((catalog["assignments"].get(value) for value in thread_ids if catalog["assignments"].get(value)), None)
+    if not project_id and not any(value in catalog["projectless"] for value in thread_ids) and item.get("cwd"):
+        try:
+            cwd = Path(item["cwd"]).expanduser().resolve()
+        except OSError:
+            cwd = Path(item["cwd"]).expanduser().absolute()
+        for candidate_id, project in catalog["projects"].items():
+            for root_value in project["roots"]:
+                try:
+                    cwd.relative_to(Path(root_value).expanduser().resolve())
+                    project_id = candidate_id
+                    break
+                except (ValueError, OSError):
+                    continue
+            if project_id:
+                break
+    project = catalog["projects"].get(project_id) if project_id else None
+    item["project_id"] = project_id
+    item["project_name"] = project["name"] if project else None
+    item["project_path"] = project["roots"][0] if project and project["roots"] else None
+    item["projectless"] = not bool(project_id)
+
+
 def resolve_storage_target(data: dict) -> str:
     """Resolve the current storage contract without pretending cloud is shipped."""
     target = data.get("storage_target") or {}
@@ -248,7 +303,7 @@ def session_record(path: Path, min_age: float, priority=None, protected_sessions
         reasons.append("protected_session")
     return {
         "path": str(path), "name": path.name, "id": meta.get("id"), "parent_id": meta.get("parent_thread_id"),
-        "cwd": meta.get("cwd") or "", "kind": kind, "logical": logical, "logical_h": human_bytes(logical),
+        "cwd": meta.get("cwd") or "", "timestamp": meta.get("timestamp"), "kind": kind, "logical": logical, "logical_h": human_bytes(logical),
         "local_allocated": local_allocated(path), "local_allocated_h": human_bytes(local_allocated(path)),
         "age_days": round(age, 1), "last_turn_complete": completed, "linked": linked,
         "target": str(target) if target else None, "target_exists": target_exists, "backup": str(backup),
@@ -260,9 +315,12 @@ def session_record(path: Path, min_age: float, priority=None, protected_sessions
 def scan(codex_home: Path, min_age: float = 30, priority=None, protected_sessions=None) -> dict:
     root = codex_home / "sessions"
     sessions = []
+    catalog = load_project_catalog(codex_home)
     if root.exists():
         for path in root.rglob("*.jsonl"):
-            sessions.append(session_record(path, min_age, priority, protected_sessions))
+            item = session_record(path, min_age, priority, protected_sessions)
+            attach_project(item, catalog)
+            sessions.append(item)
     sessions.sort(key=lambda item: item["logical"], reverse=True)
     disk = shutil.disk_usage(Path.home())
     eligible = [item for item in sessions if item["eligible"]]
