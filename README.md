@@ -1,6 +1,6 @@
 # Codex Memory Harbor · 记忆港
 
-![Memory Harbor logo](skills/codex-memory-harbor/assets/dashboard/memory-harbor-logo-v1.png)
+![Memory Harbor logo](skills/codex-memory-harbor/assets/dashboard/memory-harbor-logo-v2.png)
 
 Codex Memory Harbor safely docks old Codex **child-task session logs** on a permanently attached external drive while preserving their original paths through verified symlinks.
 

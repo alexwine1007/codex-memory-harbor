@@ -6,7 +6,7 @@ CONTENTS="$APP/Contents"
 mkdir -p "$CONTENTS/MacOS" "$CONTENTS/Resources"
 xcrun swiftc "$ROOT/macos/CodexMemoryHarbor.swift" -o "$CONTENTS/MacOS/CodexMemoryHarbor" -framework Cocoa -framework WebKit
 cp "$ROOT/skills/codex-memory-harbor/assets/icon-large.svg" "$CONTENTS/Resources/icon.svg"
-ICON_SOURCE="$ROOT/skills/codex-memory-harbor/assets/memory-harbor-logo-1024.png"
+ICON_SOURCE="$ROOT/skills/codex-memory-harbor/assets/memory-harbor-logo-v2-1024.png"
 ICONSET="$ROOT/dist/MemoryHarbor.iconset"
 rm -rf "$ICONSET"
 mkdir -p "$ICONSET"
