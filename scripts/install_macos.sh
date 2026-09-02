@@ -31,6 +31,13 @@ mkdir -p "$HOME/.codex/skills" "$HOME/Applications" "$HOME/Library/LaunchAgents"
 /usr/bin/pkill -TERM -x MemoryHarbor >/dev/null 2>&1 || true
 /usr/bin/pkill -TERM -x CodexMemoryHarbor >/dev/null 2>&1 || true
 
+# Older helpers could leave their Python child behind after an abrupt exit.
+while read -r SERVER_PID SERVER_COMMAND; do
+  if [[ "$SERVER_COMMAND" == *"$SKILL_DEST/scripts/harbor.py serve"* ]]; then
+    /bin/kill -TERM "$SERVER_PID" >/dev/null 2>&1 || true
+  fi
+done < <(/bin/ps -axo pid=,command=)
+
 ditto "$ROOT/skills/codex-memory-harbor" "$SKILL_DEST"
 "$ROOT/scripts/build_macos_app.sh" >/dev/null
 

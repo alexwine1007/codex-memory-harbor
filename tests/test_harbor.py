@@ -5,6 +5,8 @@ import os
 from pathlib import Path
 import sqlite3
 import plistlib
+import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -29,8 +31,8 @@ class HarborTests(unittest.TestCase):
         metadata = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
         readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
         self.assertIn('name = "memory-harbor"', metadata)
-        self.assertIn('version = "0.4.3b1"', metadata)
-        self.assertEqual(harbor.VERSION, "0.4.3-beta.1")
+        self.assertIn('version = "0.4.4b1"', metadata)
+        self.assertEqual(harbor.VERSION, "0.4.4-beta.1")
         self.assertEqual(readme.splitlines()[0], "# Memory Harbor")
         self.assertIn("canonical checkout directory is `memory-harbor`", readme)
         self.assertIn("`codex-memory-harbor` compatibility symlink", readme)
@@ -55,6 +57,93 @@ class HarborTests(unittest.TestCase):
         self.assertIn('com.alexsolar.memory-harbor', install)
         self.assertIn('Add :ProgramArguments:1 string $APP_DEST', install)
         self.assertNotIn('Add :ProgramArguments:1 string -a', install)
+
+    def test_dashboard_helper_uses_owned_dynamic_server_and_real_icon(self):
+        helper = (REPO_ROOT / "macos/CodexMemoryHarborDashboard.swift").read_text(encoding="utf-8")
+        owner = (REPO_ROOT / "macos/CodexMemoryHarbor.swift").read_text(encoding="utf-8")
+        build = (REPO_ROOT / "scripts/build_macos_app.sh").read_text(encoding="utf-8")
+        install = (REPO_ROOT / "scripts/install_macos.sh").read_text(encoding="utf-8")
+        self.assertIn('"--port", "0", "--parent-pid"', helper)
+        self.assertNotIn("private let port = 48765", helper)
+        self.assertIn("failStartup", helper)
+        self.assertIn("setActivationPolicy(.accessory)", owner)
+        self.assertIn('CFBundleIconFile string MemoryHarbor', build)
+        self.assertIn('MemoryHarbor.icns" "$HELPER/Contents/Resources', build)
+        self.assertIn('$SKILL_DEST/scripts/harbor.py serve', install)
+
+    def test_dashboard_server_can_bind_an_ephemeral_port(self):
+        with tempfile.TemporaryDirectory() as d:
+            env = os.environ.copy()
+            env["CODEX_HARBOR_CONFIG"] = str(Path(d) / "config.json")
+            process = subprocess.Popen(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "--codex-home",
+                    d,
+                    "serve",
+                    "--port",
+                    "0",
+                    "--parent-pid",
+                    str(os.getpid()),
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                env=env,
+            )
+            try:
+                payload = json.loads(process.stdout.readline())
+                self.assertRegex(payload["url"], r"^http://127\.0\.0\.1:\d+/$")
+                self.assertNotIn(":48765/", payload["url"])
+                with urllib.request.urlopen(payload["url"], timeout=3) as response:
+                    self.assertEqual(response.status, 200)
+                    self.assertIn(b"Memory Harbor", response.read())
+            finally:
+                process.terminate()
+                process.wait(timeout=5)
+                process.stdout.close()
+                process.stderr.close()
+
+    def test_dashboard_server_exits_when_its_helper_parent_exits(self):
+        with tempfile.TemporaryDirectory() as d:
+            env = os.environ.copy()
+            env["CODEX_HARBOR_CONFIG"] = str(Path(d) / "config.json")
+            parent_code = """
+import json, os, subprocess, sys
+child = subprocess.Popen(
+    [sys.executable, sys.argv[1], '--codex-home', sys.argv[2], 'serve', '--port', '0', '--parent-pid', str(os.getpid())],
+    stdout=subprocess.PIPE,
+    stderr=subprocess.DEVNULL,
+    text=True,
+)
+payload = json.loads(child.stdout.readline())
+print(json.dumps({'pid': child.pid, 'url': payload['url']}), flush=True)
+"""
+            parent = subprocess.run(
+                [sys.executable, "-c", parent_code, str(SCRIPT), d],
+                capture_output=True,
+                text=True,
+                timeout=5,
+                env=env,
+                check=True,
+            )
+            payload = json.loads(parent.stdout)
+            stopped = False
+            try:
+                for _ in range(30):
+                    try:
+                        urllib.request.urlopen(payload["url"], timeout=0.2).close()
+                    except Exception:
+                        stopped = True
+                        break
+                    time.sleep(0.1)
+                self.assertTrue(stopped, "server stayed reachable after its helper parent exited")
+            finally:
+                try:
+                    os.kill(payload["pid"], 15)
+                except ProcessLookupError:
+                    pass
 
     def fixture(self, root: Path, child=True, complete=True):
         path = root / "sessions/2026/01/01/rollout-test.jsonl"; path.parent.mkdir(parents=True)

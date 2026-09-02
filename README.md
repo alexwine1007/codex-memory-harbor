@@ -108,6 +108,10 @@ The desktop card is native Cocoa and keeps neither WebKit nor the Python dashboa
 resident. Clicking `整理空间` launches an isolated detail helper; `放回桌面` terminates that
 helper and server so macOS can reclaim their complete working set.
 
+Each detail helper owns an ephemeral localhost port rather than competing for one fixed
+port. Its server watches the helper process and exits with it even after an abrupt helper
+termination; the installer also retires any server orphan left by an older build.
+
 Run the repeatable local benchmark with:
 
 ```bash

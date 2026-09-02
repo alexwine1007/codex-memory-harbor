@@ -22,11 +22,12 @@ import time
 import urllib.parse
 import webbrowser
 import re
+import select
 from collections import deque
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "0.4.3-beta.1"
+VERSION = "0.4.4-beta.1"
 DEFAULT_ARCHIVE = "Memory Harbor"
 LEGACY_ARCHIVES = ("Codex Memory Harbor",)
 CATALOG_SCHEMA_VERSION = 3
@@ -1569,23 +1570,51 @@ class HarborHandler(BaseHTTPRequestHandler):
                 mutation_lock.release()
 
 
+def stop_server_when_parent_exits(server: ThreadingHTTPServer, parent_pid: int) -> None:
+    """Stop a helper-owned server even if its macOS parent is killed abruptly."""
+    if parent_pid <= 1:
+        return
+    if hasattr(select, "kqueue"):
+        queue = select.kqueue()
+        try:
+            event = select.kevent(
+                parent_pid,
+                filter=select.KQ_FILTER_PROC,
+                flags=select.KQ_EV_ADD | select.KQ_EV_ENABLE,
+                fflags=select.KQ_NOTE_EXIT,
+            )
+            queue.control([event], 0, 0)
+            queue.control(None, 1, None)
+        except OSError:
+            pass
+        finally:
+            queue.close()
+    else:
+        while os.getppid() == parent_pid:
+            time.sleep(0.25)
+    server.shutdown()
+
+
 def serve(args) -> None:
     assets = Path(__file__).resolve().parent.parent / "assets" / "dashboard"
     token = secrets.token_urlsafe(24); codex_home = Path(args.codex_home or os.environ.get("CODEX_HOME", "~/.codex")).expanduser().absolute()
     config = load_config(); priority = "\n".join(config["protected_projects"])
     server = ThreadingHTTPServer(("127.0.0.1", args.port), HarborHandler); server.app = {"assets": assets, "token": token, "codex_home": codex_home, "priority": priority, "protected_sessions": config["protected_sessions"], "cache": None, "cache_lock": threading.Lock(), "mutation_lock": threading.Lock()}
+    if args.parent_pid:
+        threading.Thread(target=stop_server_when_parent_exits, args=(server, args.parent_pid), daemon=True).start()
     url = f"http://127.0.0.1:{server.server_port}/"
     print(json.dumps({"url": url, "version": VERSION, "codex_home": str(codex_home)}, ensure_ascii=False), flush=True)
     if args.open: threading.Timer(0.35, lambda: webbrowser.open(url)).start()
     try: server.serve_forever()
     except KeyboardInterrupt: pass
+    finally: server.server_close()
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__); parser.add_argument("--codex-home")
     sub = parser.add_subparsers(dest="command", required=True)
     scan_p = sub.add_parser("scan"); scan_p.add_argument("--min-age", type=float, default=30); scan_p.add_argument("--priority")
-    serve_p = sub.add_parser("serve"); serve_p.add_argument("--port", type=int, default=48765); serve_p.add_argument("--open", action="store_true")
+    serve_p = sub.add_parser("serve"); serve_p.add_argument("--port", type=int, default=48765); serve_p.add_argument("--parent-pid", type=int); serve_p.add_argument("--open", action="store_true")
     audit_p = sub.add_parser("audit"); audit_p.add_argument("path")
     search_p = sub.add_parser("search"); search_p.add_argument("query"); search_p.add_argument("--limit", type=int, default=20)
     recall_p = sub.add_parser("recall"); recall_p.add_argument("query"); recall_p.add_argument("--limit", type=int, default=20)

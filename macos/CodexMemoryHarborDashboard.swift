@@ -5,11 +5,13 @@ final class DashboardDelegate: NSObject, NSApplicationDelegate, WKNavigationDele
     private var window: NSWindow!
     private var webView: WKWebView!
     private var server: Process?
+    private var serverOutput: Pipe?
     private var workspaceObservers: [NSObjectProtocol] = []
-    private let port = 48765
+    private var startupSucceeded = false
+    private var startupFailed = false
+    private var isTerminating = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        startServer()
         let visible = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1180, height: 790)
         let width = min(1180, max(760, visible.width - 28))
         let height = min(790, max(620, visible.height - 28))
@@ -18,22 +20,40 @@ final class DashboardDelegate: NSObject, NSApplicationDelegate, WKNavigationDele
         window.title = "Memory Harbor"
         window.minSize = NSSize(width: min(760, width), height: min(620, height))
         window.titlebarAppearsTransparent = true
-        window.isOpaque = false
-        window.backgroundColor = .clear
+        window.isOpaque = true
+        window.backgroundColor = NSColor(calibratedRed: 0.055, green: 0.063, blue: 0.095, alpha: 1)
         webView = WKWebView(frame: NSRect(origin: .zero, size: frame.size))
         webView.autoresizingMask = [.width, .height]
         webView.navigationDelegate = self
         webView.setValue(false, forKey: "drawsBackground")
-        window.contentView = webView
+        webView.isHidden = true
+        let container = NSView(frame: NSRect(origin: .zero, size: frame.size))
+        container.wantsLayer = true
+        container.layer?.backgroundColor = window.backgroundColor.cgColor
+        container.addSubview(webView)
+        let progress = NSProgressIndicator(frame: NSRect(x: frame.width / 2 - 10, y: frame.height / 2 + 7, width: 20, height: 20))
+        progress.style = .spinning
+        progress.startAnimation(nil)
+        progress.autoresizingMask = [.minXMargin, .maxXMargin, .minYMargin, .maxYMargin]
+        container.addSubview(progress)
+        let loading = NSTextField(labelWithString: "正在打开 Memory Harbor…")
+        loading.textColor = NSColor(calibratedWhite: 0.72, alpha: 1)
+        loading.alignment = .center
+        loading.frame = NSRect(x: frame.width / 2 - 150, y: frame.height / 2 - 30, width: 300, height: 22)
+        loading.autoresizingMask = [.minXMargin, .maxXMargin, .minYMargin, .maxYMargin]
+        container.addSubview(loading)
+        window.contentView = container
         installVolumeObservers()
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
-        loadWhenReady(attempt: 0)
+        startServer()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        isTerminating = true
         let center = NSWorkspace.shared.notificationCenter
         workspaceObservers.forEach { center.removeObserver($0) }
+        serverOutput?.fileHandleForReading.readabilityHandler = nil
         server?.terminate()
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
@@ -44,25 +64,94 @@ final class DashboardDelegate: NSObject, NSApplicationDelegate, WKNavigationDele
     }
 
     private func startServer() {
+        let path = scriptPath()
+        guard FileManager.default.isReadableFile(atPath: path) else {
+            failStartup("未找到已安装的 Memory Harbor Skill。")
+            return
+        }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
-        process.arguments = [scriptPath(), "serve", "--port", String(port)]
-        let log = Pipe()
-        process.standardOutput = log
-        process.standardError = log
-        do { try process.run(); server = process }
-        catch { showError("无法启动本地仪表盘：\(error.localizedDescription)") }
+        process.arguments = [path, "serve", "--port", "0", "--parent-pid", String(ProcessInfo.processInfo.processIdentifier)]
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = FileHandle.standardError
+        server = process
+        serverOutput = output
+        process.terminationHandler = { [weak self] finished in
+            DispatchQueue.main.async {
+                guard let self, self.server === finished else { return }
+                self.server = nil
+                if !self.isTerminating {
+                    let message = self.startupSucceeded
+                        ? "本地仪表盘服务已停止，请重新打开详情页。"
+                        : "本地仪表盘服务提前退出（状态 \(finished.terminationStatus)）。"
+                    self.failStartup(message)
+                }
+            }
+        }
+        do {
+            try process.run()
+            readServerAddress(from: output, process: process)
+        } catch {
+            server = nil
+            failStartup("无法启动本地仪表盘：\(error.localizedDescription)")
+        }
     }
 
-    private func loadWhenReady(attempt: Int) {
-        guard attempt < 35 else { showError("仪表盘未能在本机端口 \(port) 启动。请检查 Skill 是否安装。"); return }
-        let url = URL(string: "http://127.0.0.1:\(port)/")!
+    private func readServerAddress(from output: Pipe, process: Process) {
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            var data = Data()
+            while process.isRunning && data.firstIndex(of: 0x0A) == nil && data.count < 65_536 {
+                let chunk = output.fileHandleForReading.availableData
+                if chunk.isEmpty { break }
+                data.append(chunk)
+            }
+            let lineData = data.firstIndex(of: 0x0A).map { data.prefix(upTo: $0) } ?? data[...]
+            guard
+                !lineData.isEmpty,
+                let payload = try? JSONSerialization.jsonObject(with: Data(lineData)) as? [String: Any],
+                let value = payload["url"] as? String,
+                let url = URL(string: value)
+            else {
+                DispatchQueue.main.async { self?.failStartup("本地仪表盘没有返回有效的启动地址。") }
+                return
+            }
+            DispatchQueue.main.async {
+                guard self?.server === process, process.isRunning else { return }
+                self?.loadWhenReady(url: url, attempt: 0)
+            }
+        }
+    }
+
+    private func loadWhenReady(url: URL, attempt: Int) {
+        guard attempt < 35 else { failStartup("本地仪表盘服务启动超时。"); return }
         URLSession.shared.dataTask(with: url) { [weak self] _, response, _ in
             DispatchQueue.main.async {
-                if response != nil { self?.webView.load(URLRequest(url: url)) }
-                else { DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) { self?.loadWhenReady(attempt: attempt + 1) } }
+                if response != nil {
+                    self?.startupSucceeded = true
+                    self?.webView.load(URLRequest(url: url))
+                } else {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+                        self?.loadWhenReady(url: url, attempt: attempt + 1)
+                    }
+                }
             }
         }.resume()
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        webView.isHidden = false
+        webView.superview?.subviews.filter { $0 !== webView }.forEach { $0.isHidden = true }
+    }
+
+    private func failStartup(_ message: String) {
+        guard !startupFailed && !isTerminating else { return }
+        startupFailed = true
+        serverOutput?.fileHandleForReading.readabilityHandler = nil
+        server?.terminate()
+        window?.orderOut(nil)
+        showError(message)
+        NSApp.terminate(nil)
     }
 
     private func installVolumeObservers() {
