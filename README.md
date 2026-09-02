@@ -35,6 +35,10 @@ Memory Harbor uses a transactional sequence:
 
 The dashboard can optionally keep that rollback as a **local backup**. This is a backup-retention choice, not a completed space-reclaiming migration, and the UI labels it accordingly.
 
+Mutation requests are serialized. Retrying a task that already has a verified external
+primary is idempotent success, so duplicate submits cannot trigger a second deletion or a
+false failure after a completed migration.
+
 ## Quick start
 
 ```bash

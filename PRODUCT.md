@@ -41,6 +41,8 @@ at 25 files or 5 GB and stops on the first error. After the user confirms a migr
 item is copied, verified, linked, independently re-audited, and then its local entity is
 released before the next item begins. The user may instead choose to keep a local backup;
 that mode does not reclaim the corresponding internal space.
+The client permits only one active operation, mutation APIs are serialized, and a retry of
+an already verified migration is idempotent success rather than a second destructive step.
 
 ## Information architecture
 

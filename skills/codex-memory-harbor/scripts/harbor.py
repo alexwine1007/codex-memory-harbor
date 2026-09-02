@@ -26,7 +26,7 @@ from collections import deque
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "0.4.1-beta.1"
+VERSION = "0.4.2-beta.1"
 DEFAULT_ARCHIVE = "Memory Harbor"
 LEGACY_ARCHIVES = ("Codex Memory Harbor",)
 CATALOG_SCHEMA_VERSION = 3
@@ -1423,6 +1423,21 @@ def migrate_one(plan: dict, volume: Path, archive_name: str, codex_home: Path) -
     }
 
 
+def migrate_path(path_value: str, codex_home: Path, volume: Path, archive_name: str, min_age: float, priority=None, protected_sessions=None) -> dict:
+    """Idempotently complete one migration, including a previously interrupted one."""
+    source, _ = lexical_session(path_value, codex_home)
+    if source.is_symlink():
+        audit = audit_one(path_value, codex_home)
+        if not audit["verified"]:
+            raise HarborError("Existing offload link failed verification")
+        if audit["backup_exists"]:
+            finalized = finalize_one(path_value, codex_home)
+            return {**audit, "event": "migrated_external_primary", "backup_exists": False, "bytes_released": finalized["bytes_released"], "bytes_released_h": finalized["bytes_released_h"]}
+        return {**audit, "event": "already_migrated", "bytes_released": 0, "bytes_released_h": human_bytes(0)}
+    plan = plan_offload(path_value, codex_home, str(volume), archive_name, min_age, priority, protected_sessions)
+    return migrate_one(plan, volume, archive_name, codex_home)
+
+
 def restore_one(path_value: str, codex_home: Path) -> dict:
     source, _ = lexical_session(path_value, codex_home)
     if not source.is_symlink(): raise HarborError("Source is not an offload symlink")
@@ -1487,9 +1502,12 @@ class HarborHandler(BaseHTTPRequestHandler):
         file = (self.app["assets"] / asset).resolve()
         if not str(file).startswith(str(self.app["assets"].resolve())) or not file.is_file(): return self.send_error(404)
         raw = file.read_bytes(); self.send_response(200); self.send_header("Content-Type", mimetypes.guess_type(file.name)[0] or "application/octet-stream")
-        self.send_header("Content-Length", str(len(raw))); self.end_headers(); self.wfile.write(raw)
+        self.send_header("Cache-Control", "no-store"); self.send_header("Content-Length", str(len(raw))); self.end_headers(); self.wfile.write(raw)
     def do_POST(self):
         if self.headers.get("X-Harbor-Token") != self.app["token"]: return self.send_json(403, {"error": "Invalid action token"})
+        mutation_lock = self.app.get("mutation_lock") if self.path in ("/api/offload", "/api/migrate", "/api/finalize", "/api/restore") else None
+        if mutation_lock:
+            mutation_lock.acquire()
         try:
             data = self.body()
             if self.path == "/api/settings":
@@ -1529,10 +1547,10 @@ class HarborHandler(BaseHTTPRequestHandler):
             elif self.path in ("/api/offload", "/api/migrate"):
                 volume = mounted_volume(resolve_storage_target(data)); archive = data.get("archive_name") or DEFAULT_ARCHIVE
                 for path in paths:
-                    plan = plan_offload(path, self.app["codex_home"], str(volume), archive, float(data.get("min_age", 30)), data.get("priority") or None, self.app["protected_sessions"])
                     if self.path == "/api/migrate":
-                        results.append(migrate_one(plan, volume, archive, self.app["codex_home"]))
+                        results.append(migrate_path(path, self.app["codex_home"], volume, archive, float(data.get("min_age", 30)), data.get("priority") or None, self.app["protected_sessions"]))
                     else:
+                        plan = plan_offload(path, self.app["codex_home"], str(volume), archive, float(data.get("min_age", 30)), data.get("priority") or None, self.app["protected_sessions"])
                         results.append(offload_one(plan, volume, archive, self.app["codex_home"]))
             elif self.path == "/api/audit":
                 for path in paths: results.append(audit_one(path, self.app["codex_home"]))
@@ -1546,13 +1564,16 @@ class HarborHandler(BaseHTTPRequestHandler):
             self.send_json(200, {"ok": True, "results": results})
         except Exception as exc:
             self.send_json(400, {"ok": False, "error": str(exc)})
+        finally:
+            if mutation_lock:
+                mutation_lock.release()
 
 
 def serve(args) -> None:
     assets = Path(__file__).resolve().parent.parent / "assets" / "dashboard"
     token = secrets.token_urlsafe(24); codex_home = Path(args.codex_home or os.environ.get("CODEX_HOME", "~/.codex")).expanduser().absolute()
     config = load_config(); priority = "\n".join(config["protected_projects"])
-    server = ThreadingHTTPServer(("127.0.0.1", args.port), HarborHandler); server.app = {"assets": assets, "token": token, "codex_home": codex_home, "priority": priority, "protected_sessions": config["protected_sessions"], "cache": None, "cache_lock": threading.Lock()}
+    server = ThreadingHTTPServer(("127.0.0.1", args.port), HarborHandler); server.app = {"assets": assets, "token": token, "codex_home": codex_home, "priority": priority, "protected_sessions": config["protected_sessions"], "cache": None, "cache_lock": threading.Lock(), "mutation_lock": threading.Lock()}
     url = f"http://127.0.0.1:{server.server_port}/"
     print(json.dumps({"url": url, "version": VERSION, "codex_home": str(codex_home)}, ensure_ascii=False), flush=True)
     if args.open: threading.Timer(0.35, lambda: webbrowser.open(url)).start()

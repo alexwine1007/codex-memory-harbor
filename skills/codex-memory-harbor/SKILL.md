@@ -25,6 +25,7 @@ Treat Codex session JSONL as recovery and audit evidence, not cache.
 - Treat **migration** and **backup retention** as different product choices. A confirmed dashboard migration copies, size-checks, SHA-256-checks, replaces the source with an absolute symlink, independently re-audits it, and then automatically removes the local entity. The confirmation dialog is the authorization for that selected batch.
 - If the user selects **同时保留本地备份**, keep `.offload-local-backup`; this does not reclaim that space. Deleting such a retained backup later requires a separate explicit confirmation.
 - Never remove the local entity unless the external target and source link pass the independent re-audit. If any step fails, stop the batch and preserve the recoverable local file or rollback copy.
+- Serialize mutation requests and make migration retries idempotent. A repeated request for an already verified external-only task is success, not a second deletion attempt.
 - Stop a batch on the first failure. Never silently skip a verification error.
 - Do not move the whole `sessions` root or active main tasks.
 - Do not index prompts, responses, tool output, browser state, or credentials in the local discovery catalog.

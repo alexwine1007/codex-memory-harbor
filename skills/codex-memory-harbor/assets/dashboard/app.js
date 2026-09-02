@@ -9,6 +9,7 @@ let activeTask=null;
 let searchMatches=null;
 let searchResults=[];
 let searchTimer=0;
+let operationBusy=false;
 const selected=new Set();
 const recommended=new Set();
 const pinnedInView=new Set();
@@ -180,7 +181,8 @@ function updateSelection(){
   const items=data.sessions.filter(item=>selected.has(item.path)),projects=new Set(items.map(item=>item.project_id||'__standalone__')),linkedMode=filter==='linked';
   $('#selected').textContent=items.length?`已选 ${items.length} 个任务 · ${projects.size} 个分组`:'未选择任务';
   $('#selectedSize').textContent=fmt(items.reduce((total,item)=>total+(item.backup_exists?item.backup_bytes:item.logical),0));
-  $('#offload').disabled=!items.length;$('#offload').textContent=items.length?(linkedMode?'管理所选':'迁移所选'):(linkedMode?'选择已停泊任务':'选择任务后迁移');
+  $('#offload').disabled=operationBusy||!items.length;$('#offload').textContent=operationBusy?'操作进行中…':items.length?(linkedMode?'管理所选':'迁移所选'):(linkedMode?'选择已停泊任务':'选择任务后迁移');
+  $('#optimize').disabled=operationBusy;$('#selectAll').disabled=operationBusy;
 }
 async function post(path,body){const response=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json','X-Harbor-Token':token},body:JSON.stringify(body)});const json=await response.json();if(!response.ok||!json.ok)throw Error(json.error||'操作失败');return json}
 function base(paths=[...selected]){return{paths,volume:$('#volume').value,storage_target:{provider:'external_volume',location:$('#volume').value},min_age:30,priority:(config.protected_projects||[]).join('\n'),archive_name:'Memory Harbor'}}
@@ -200,13 +202,17 @@ function selectRecommended(){
   renderProjects();updateSelection();return data.sessions.filter(item=>selected.has(item.path));
 }
 async function prepareMigration(items,title='迁移所选任务'){
-  if(!$('#volume').value)throw Error('请先连接并选择一个可写外置盘');
-  if(!items.length)throw Error('请先选择要整理的任务');
-  const plan=await post('/api/plan',base(items.map(item=>item.path))),total=plan.results.reduce((sum,item)=>sum+item.bytes,0);
-  const confirmed=await ask(title,`<p>将迁移 <b>${items.length}</b> 个已完成子任务，共 <b>${fmt(total)}</b>。</p><p>每项都会先复制、校验并建立可读取连接；通过后自动删除本地实体并释放空间。</p><label class="backup-option"><input id="keepLocalBackup" type="checkbox"><span><b>同时保留本地备份</b><small>用于额外观察；不会释放这部分内盘空间</small></span></label>`);
-  const keepLocalBackup=Boolean($('#keepLocalBackup')?.checked);
-  if(!confirmed)return;
-  await executeMigration(items,{keepLocalBackup});
+  if(operationBusy){toast('已有迁移操作正在进行');return}
+  operationBusy=true;updateSelection();
+  try{
+    if(!$('#volume').value)throw Error('请先连接并选择一个可写外置盘');
+    if(!items.length)throw Error('请先选择要整理的任务');
+    const plan=await post('/api/plan',base(items.map(item=>item.path))),total=plan.results.reduce((sum,item)=>sum+item.bytes,0);
+    const confirmed=await ask(title,`<p>将迁移 <b>${items.length}</b> 个已完成子任务，共 <b>${fmt(total)}</b>。</p><p>每项都会先复制、校验并建立可读取连接；通过后自动删除本地实体并释放空间。</p><label class="backup-option"><input id="keepLocalBackup" type="checkbox"><span><b>同时保留本地备份</b><small>用于额外观察；不会释放这部分内盘空间</small></span></label>`);
+    const keepLocalBackup=Boolean($('#keepLocalBackup')?.checked);
+    if(!confirmed)return;
+    await executeMigration(items,{keepLocalBackup});
+  }finally{operationBusy=false;updateSelection()}
 }
 function setProgress(completed,total,bytes,totalBytes,stage){$('#progressCount').textContent=`${completed} / ${total}`;$('#progressBytes').textContent=`${fmt(bytes)} / ${fmt(totalBytes)}`;$('#progressFill').style.width=(total?completed/total*100:0)+'%';$('#progressStage').textContent=stage}
 async function executeMigration(items,{keepLocalBackup=false}={}){

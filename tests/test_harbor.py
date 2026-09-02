@@ -1,4 +1,5 @@
 import importlib.util
+from concurrent.futures import ThreadPoolExecutor
 import json
 import os
 from pathlib import Path
@@ -334,7 +335,7 @@ class HarborTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as v:
             root=Path(d); p=self.fixture(root); volume=Path(v); original=p.read_bytes()
             server=harbor.ThreadingHTTPServer(("127.0.0.1",0),harbor.HarborHandler)
-            server.app={"assets":Path(d),"token":"test-token","codex_home":root,"priority":"","protected_sessions":[],"cache":None,"cache_lock":threading.Lock()}
+            server.app={"assets":Path(d),"token":"test-token","codex_home":root,"priority":"","protected_sessions":[],"cache":None,"cache_lock":threading.Lock(),"mutation_lock":threading.Lock()}
             thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
             request=urllib.request.Request(
                 f"http://127.0.0.1:{server.server_port}/api/migrate",
@@ -352,6 +353,30 @@ class HarborTests(unittest.TestCase):
             self.assertTrue(p.is_symlink())
             self.assertEqual(p.read_bytes(),original)
             self.assertFalse(Path(str(p)+".offload-local-backup").exists())
+
+    def test_concurrent_migrate_requests_are_serialized_and_idempotent(self):
+        with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as v:
+            root=Path(d); p=self.fixture(root); volume=Path(v); original=p.read_bytes()
+            server=harbor.ThreadingHTTPServer(("127.0.0.1",0),harbor.HarborHandler)
+            server.app={"assets":Path(d),"token":"test-token","codex_home":root,"priority":"","protected_sessions":[],"cache":None,"cache_lock":threading.Lock(),"mutation_lock":threading.Lock()}
+            thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+            url=f"http://127.0.0.1:{server.server_port}/api/migrate"
+            payload=json.dumps({"paths":[str(p)],"volume":str(volume),"archive_name":"Archive","min_age":14}).encode()
+            def send():
+                request=urllib.request.Request(url,data=payload,headers={"Content-Type":"application/json","X-Harbor-Token":"test-token"},method="POST")
+                return json.loads(urllib.request.urlopen(request,timeout=5).read())
+            try:
+                with mock.patch.object(harbor,"mounted_volume",return_value=volume):
+                    with ThreadPoolExecutor(max_workers=2) as executor:
+                        responses=list(executor.map(lambda _:send(),range(2)))
+            finally:
+                server.shutdown();server.server_close();thread.join(timeout=5)
+            self.assertTrue(all(response["ok"] for response in responses))
+            self.assertEqual({response["results"][0]["event"] for response in responses},{"migrated_external_primary","already_migrated"})
+            self.assertTrue(p.is_symlink());self.assertEqual(p.read_bytes(),original)
+            self.assertFalse(Path(str(p)+".offload-local-backup").exists())
+            manifest=volume/"Archive/manifests/offload_manifest.jsonl"
+            self.assertEqual(len(manifest.read_text().splitlines()),1)
 
 
 if __name__ == "__main__": unittest.main(verbosity=2)
