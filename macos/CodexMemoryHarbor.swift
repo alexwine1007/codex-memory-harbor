@@ -5,6 +5,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
     private var window: NSWindow!
     private var webView: WKWebView!
     private var server: Process?
+    private var workspaceObservers: [NSObjectProtocol] = []
     private let port = 48765
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -31,13 +32,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
         webView.navigationDelegate = self
         webView.setValue(false, forKey: "drawsBackground")
         window.contentView = webView
+        installVolumeObservers()
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         loadWhenReady(attempt: 0)
     }
 
-    func applicationWillTerminate(_ notification: Notification) { server?.terminate() }
+    func applicationWillTerminate(_ notification: Notification) {
+        let center = NSWorkspace.shared.notificationCenter
+        workspaceObservers.forEach { center.removeObserver($0) }
+        server?.terminate()
+    }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+
+    func applicationDidBecomeActive(_ notification: Notification) {
+        notifyVolumeChanged()
+    }
+
+    private func installVolumeObservers() {
+        let center = NSWorkspace.shared.notificationCenter
+        let names: [Notification.Name] = [
+            NSWorkspace.didMountNotification,
+            NSWorkspace.didUnmountNotification,
+            NSWorkspace.didRenameVolumeNotification,
+            NSWorkspace.didWakeNotification,
+        ]
+        workspaceObservers = names.map { name in
+            center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                self?.notifyVolumeChanged()
+            }
+        }
+    }
+
+    private func notifyVolumeChanged() {
+        guard webView != nil else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+            self?.webView.evaluateJavaScript("if (window.harborVolumeChanged) window.harborVolumeChanged();")
+        }
+    }
 
     private func scriptPath() -> String {
         if let override = ProcessInfo.processInfo.environment["CODEX_HARBOR_SCRIPT"], !override.isEmpty { return override }

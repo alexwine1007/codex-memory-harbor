@@ -20,7 +20,7 @@ import urllib.parse
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "0.1.1-beta.1"
+VERSION = "0.1.2-beta.1"
 DEFAULT_ARCHIVE = "Codex Memory Harbor"
 
 
@@ -359,6 +359,8 @@ class HarborHandler(BaseHTTPRequestHandler):
                     result = scan(self.app["codex_home"], age, priority, self.app["protected_sessions"])
                     self.app["cache"] = {"key": key, "at": time.time(), "value": result}
             return self.send_json(200, result)
+        if parsed.path == "/api/volumes":
+            return self.send_json(200, {"volumes": available_volumes(), "generated_at": int(time.time())})
         if parsed.path == "/api/config": return self.send_json(200, {"token": self.app["token"], "version": VERSION, "priority": self.app["priority"], "protected_projects": parse_projects(self.app["priority"]), "protected_sessions": self.app["protected_sessions"]})
         asset = "index.html" if parsed.path in ("/", "") else parsed.path.lstrip("/")
         file = (self.app["assets"] / asset).resolve()
