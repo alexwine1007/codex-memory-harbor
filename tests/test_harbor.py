@@ -39,6 +39,12 @@ class HarborTests(unittest.TestCase):
             root=Path(d); p=self.fixture(root)
             item=harbor.session_record(p,14,None,["child-1"])
             self.assertFalse(item["eligible"]); self.assertIn("protected_session",item["reasons"])
+    def test_cloud_provider_is_reserved_but_not_claimed_available(self):
+        targets=harbor.available_storage_targets()
+        cloud=next(item for item in targets if item["provider"]=="cloud")
+        self.assertFalse(cloud["available"])
+        with self.assertRaises(harbor.HarborError):
+            harbor.resolve_storage_target({"storage_target":{"provider":"cloud","location":"memory-harbor://future"}})
     def test_offload_audit_finalize_restore_cycle(self):
         with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as v:
             root=Path(d); p=self.fixture(root); volume=Path(v)

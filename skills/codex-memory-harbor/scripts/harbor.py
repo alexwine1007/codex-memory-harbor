@@ -20,7 +20,7 @@ import urllib.parse
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "0.1.2-beta.1"
+VERSION = "0.2.0-beta.1"
 DEFAULT_ARCHIVE = "Codex Memory Harbor"
 
 
@@ -174,6 +174,41 @@ def available_volumes() -> list[dict]:
     return result
 
 
+def available_storage_targets() -> list[dict]:
+    """Stable provider boundary: cloud backends can implement this contract later."""
+    targets = [
+        {
+            "id": f"external:{volume['path']}",
+            "provider": "external_volume",
+            "location": volume["path"],
+            "name": volume["name"],
+            "available": volume["writable"],
+            "free": volume["free"],
+            "free_h": volume["free_h"],
+        }
+        for volume in available_volumes()
+    ]
+    targets.append({
+        "id": "cloud:future",
+        "provider": "cloud",
+        "location": "",
+        "name": "Memory Harbor Cloud",
+        "available": False,
+        "status": "future",
+    })
+    return targets
+
+
+def resolve_storage_target(data: dict) -> str:
+    """Resolve the current storage contract without pretending cloud is shipped."""
+    target = data.get("storage_target") or {}
+    provider = target.get("provider") or "external_volume"
+    location = target.get("location") or data.get("volume") or ""
+    if provider != "external_volume":
+        raise HarborError(f"Storage provider is not available yet: {provider}")
+    return str(mounted_volume(location))
+
+
 def session_record(path: Path, min_age: float, priority=None, protected_sessions=None) -> dict:
     linked = path.is_symlink()
     target = Path(os.readlink(path)) if linked else None
@@ -244,7 +279,7 @@ def scan(codex_home: Path, min_age: float = 30, priority=None, protected_session
         "version": VERSION, "codex_home": str(codex_home), "priority": priority or "", "min_age": min_age,
         "disk": {"free": disk.free, "free_h": human_bytes(disk.free), "total": disk.total, "used": disk.used,
                  "used_percent": round(disk.used / disk.total * 100, 1)},
-        "totals": totals, "volumes": available_volumes(), "sessions": sessions, "generated_at": int(time.time()),
+        "totals": totals, "volumes": available_volumes(), "storage_targets": available_storage_targets(), "sessions": sessions, "generated_at": int(time.time()),
     }
 
 
@@ -361,6 +396,8 @@ class HarborHandler(BaseHTTPRequestHandler):
             return self.send_json(200, result)
         if parsed.path == "/api/volumes":
             return self.send_json(200, {"volumes": available_volumes(), "generated_at": int(time.time())})
+        if parsed.path == "/api/storage-targets":
+            return self.send_json(200, {"storage_targets": available_storage_targets(), "generated_at": int(time.time())})
         if parsed.path == "/api/config": return self.send_json(200, {"token": self.app["token"], "version": VERSION, "priority": self.app["priority"], "protected_projects": parse_projects(self.app["priority"]), "protected_sessions": self.app["protected_sessions"]})
         asset = "index.html" if parsed.path in ("/", "") else parsed.path.lstrip("/")
         file = (self.app["assets"] / asset).resolve()
@@ -386,9 +423,10 @@ class HarborHandler(BaseHTTPRequestHandler):
             if not paths: raise HarborError("No sessions selected")
             results = []
             if self.path == "/api/plan":
-                for path in paths: results.append(plan_offload(path, self.app["codex_home"], data["volume"], data.get("archive_name") or DEFAULT_ARCHIVE, float(data.get("min_age", 30)), data.get("priority") or None, self.app["protected_sessions"]))
+                volume_value = resolve_storage_target(data)
+                for path in paths: results.append(plan_offload(path, self.app["codex_home"], volume_value, data.get("archive_name") or DEFAULT_ARCHIVE, float(data.get("min_age", 30)), data.get("priority") or None, self.app["protected_sessions"]))
             elif self.path == "/api/offload":
-                volume = mounted_volume(data["volume"]); archive = data.get("archive_name") or DEFAULT_ARCHIVE
+                volume = mounted_volume(resolve_storage_target(data)); archive = data.get("archive_name") or DEFAULT_ARCHIVE
                 for path in paths:
                     plan = plan_offload(path, self.app["codex_home"], str(volume), archive, float(data.get("min_age", 30)), data.get("priority") or None, self.app["protected_sessions"])
                     results.append(offload_one(plan, volume, archive))

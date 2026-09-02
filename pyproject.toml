@@ -1,6 +1,6 @@
 [project]
 name = "codex-memory-harbor"
-version = "0.1.2b1"
+version = "0.2.0b1"
 description = "Safely dock old Codex child-task session logs on external storage"
 readme = "README.md"
 requires-python = ">=3.9"

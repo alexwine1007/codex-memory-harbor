@@ -10,18 +10,30 @@ header{display:flex;align-items:center;justify-content:space-between;margin-bott
 .brand>div:last-child{display:flex;flex-direction:column;gap:3px}
 .brand b{font-size:16px}
 .brand span{font-size:12px;color:var(--muted)}
-.mark{display:grid;place-items:center;width:42px;height:42px;border-radius:14px;background:linear-gradient(145deg,#343153,#171925);border:1px solid #8c7bff66;color:#cac5ff;font-size:28px}
-.header-actions{display:flex;align-items:center;gap:10px}
-.drive-picker{display:flex;align-items:center;gap:10px;min-width:232px;padding:7px 11px;border:1px solid #ffffff13;border-radius:13px;background:linear-gradient(145deg,#1b1e2a,#151721);cursor:pointer}
+.mark{display:grid;place-items:center;width:42px;height:42px;border-radius:14px;overflow:hidden;background:#111526;border:1px solid #8c7bff66}
+.mark img,.progress-mark img{display:block;width:100%;height:100%;object-fit:cover}
+.header-actions{display:flex;align-items:stretch;gap:10px;height:50px}
+.drive-control{position:relative;height:50px}
+.drive-picker{display:grid;grid-template-columns:9px minmax(0,1fr) 13px;align-items:center;gap:10px;width:252px;height:50px;padding:0 14px;border:1px solid #ffffff14;border-radius:14px;background:linear-gradient(145deg,#1b1e2a,#151721);text-align:left;cursor:pointer}
 .drive-picker i{flex:0 0 auto;width:8px;height:8px;border-radius:50%;background:var(--m);box-shadow:0 0 12px var(--m)}
 .drive-picker>span{display:flex;flex:1;min-width:0;flex-direction:column;gap:1px}
-.drive-picker small{color:#9298aa;font-size:9px;letter-spacing:.5px}
-.drive-picker select{width:100%;border:0;outline:0;background:transparent;color:#f1f2f8;font-size:12px;font-weight:600;padding:0 20px 0 0;cursor:pointer}
+.drive-picker small{color:#9298aa;font-size:9px;letter-spacing:.5px;line-height:12px}
+.drive-picker b{overflow:hidden;color:#f1f2f8;font-size:12px;line-height:17px;text-overflow:ellipsis;white-space:nowrap}
+.drive-picker .chevron{display:block;width:8px;height:8px;border-right:1.5px solid #b9bdd0;border-bottom:1.5px solid #b9bdd0;transform:rotate(45deg) translateY(-2px);transition:transform .18s}
+.drive-picker[aria-expanded=true] .chevron{transform:rotate(225deg) translate(-2px,-2px)}
+.drive-menu{position:absolute;z-index:60;top:57px;right:0;width:286px;padding:6px;border:1px solid #ffffff18;border-radius:14px;background:#191b26f5;box-shadow:0 22px 60px #000a;backdrop-filter:blur(20px)}
+.drive-menu[hidden]{display:none}
+.drive-option{display:grid;width:100%;grid-template-columns:1fr auto;gap:4px 12px;padding:10px 11px;border:0;border-radius:10px;background:transparent;text-align:left}
+.drive-option:hover,.drive-option.active{background:#ffffff09;border:0}
+.drive-option b{font-size:12px}.drive-option span{grid-column:1;color:var(--muted);font-size:10px}.drive-option em{grid-column:2;grid-row:1/3;align-self:center;color:#8e85ff;font-style:normal}
+.drive-option.future{cursor:default;opacity:.54}.drive-option.future:hover{background:transparent}.drive-option.future em{color:#aaa3ff}
+#compact{height:50px;padding:0 16px;border-radius:14px;white-space:nowrap}
 button,select,input,textarea{font:inherit;color:inherit}
 button{border:1px solid var(--line);background:#20222d;border-radius:10px;padding:9px 13px;cursor:pointer}
 button:hover{border-color:#746dcc}
 button:disabled{opacity:.32;cursor:not-allowed}
 .primary{border:0;background:linear-gradient(135deg,#7e6cff,#5d7eff);box-shadow:0 10px 28px #6657ff32}
+.optimize{min-width:112px;font-weight:650}
 .hero{text-align:center;padding:47px 24px 42px;border:1px solid var(--line);border-radius:27px;background:linear-gradient(145deg,#211f3ad9,#12151ed9);box-shadow:0 22px 70px #0005}
 .kicker{font-size:12px;color:#aaa3ff;letter-spacing:1px}
 .hero strong{display:block;font-size:68px;line-height:1;letter-spacing:-4px;margin:14px 0 12px}
@@ -72,13 +84,19 @@ h2{font-size:17px;margin:0}
 dialog{border:1px solid #ffffff18;border-radius:18px;background:#1a1c27;color:#fff;width:min(520px,90vw);padding:24px;box-shadow:0 30px 90px #000b}
 dialog::backdrop{background:#05060aaa;backdrop-filter:blur(4px)}
 dialog form{display:flex;justify-content:flex-end;gap:8px;margin-top:20px}
+.progress-dialog{text-align:center;width:min(430px,90vw)}
+.progress-mark{display:grid;place-items:center;width:48px;height:48px;margin:0 auto 16px;overflow:hidden;border:1px solid #8c7bff66;border-radius:15px;background:#8171ff18}
+.progress-dialog h3{margin:0 0 8px}.progress-dialog p{margin:0;color:var(--muted)}
+.progress-track{height:7px;margin:24px 0 10px;overflow:hidden;border-radius:99px;background:#ffffff0c}
+.progress-track i{display:block;width:0;height:100%;border-radius:inherit;background:linear-gradient(90deg,var(--v),var(--m));transition:width .25s}
+.progress-meta{display:flex;justify-content:space-between;color:var(--muted);font-size:11px}.progress-dialog>button{display:block;margin:22px auto 0}
 .plan-list{max-height:260px;overflow:auto;color:var(--muted);font-size:11px}
 .plan-list div{padding:8px 0;border-bottom:1px solid var(--line)}
 @media(max-width:780px){.summary{grid-template-columns:1fr 1fr}
 .panel-head{align-items:flex-start;gap:14px}
 .panel-tools{align-items:flex-end;flex-direction:column}
 .header-actions{gap:7px}
-.drive-picker{min-width:190px}
+.drive-picker{width:210px}
 .project{grid-template-columns:28px 1fr 80px 38px}
 .project>*:nth-child(4),.project>*:nth-child(5){display:none}
 .hero strong{font-size:54px}

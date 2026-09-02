@@ -1,6 +1,13 @@
 # Codex Memory Harbor · 记忆港
 
+![Memory Harbor logo](skills/codex-memory-harbor/assets/dashboard/memory-harbor-logo-v1.png)
+
 Codex Memory Harbor safely docks old Codex **child-task session logs** on a permanently attached external drive while preserving their original paths through verified symlinks.
+
+Version 0.2 introduces a storage-provider boundary: external volumes work today,
+while cloud storage is deliberately shown as a future provider until verified local
+materialization, offline behavior, integrity checks, and credential handling exist.
+See [PRODUCT.md](PRODUCT.md) for the product and continuity contract.
 
 It ships as three pieces that share one safety model:
 
