@@ -1,11 +1,13 @@
 import Cocoa
 import WebKit
 
-final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, NSWindowDelegate {
     private var window: NSWindow!
     private var webView: WKWebView!
     private var server: Process?
     private var workspaceObservers: [NSObjectProtocol] = []
+    private var isCompact = true
+    private let compactFrameKey = "CodexMemoryHarborCompactFrame"
     private let port = 48765
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -22,11 +24,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
         window.isOpaque = false
         window.backgroundColor = .clear
         window.hasShadow = true
+        window.delegate = self
         setWindowChrome(hidden: true)
-        if let screen = NSScreen.main {
-            let visible = screen.visibleFrame
-            window.setFrameOrigin(NSPoint(x: visible.maxX - frame.width - 26, y: visible.maxY - frame.height - 26))
-        }
+        window.setFrame(restoredCompactFrame(fallback: frame), display: false)
         webView = WKWebView(frame: frame)
         webView.autoresizingMask = [.width, .height]
         webView.navigationDelegate = self
@@ -44,6 +44,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
         server?.terminate()
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+
+    func windowDidMove(_ notification: Notification) {
+        if isCompact { saveCompactFrame() }
+    }
+
+    func windowDidEndLiveResize(_ notification: Notification) {
+        if isCompact { saveCompactFrame() }
+    }
 
     func applicationDidBecomeActive(_ notification: Notification) {
         notifyVolumeChanged()
@@ -69,6 +77,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
             self?.webView.evaluateJavaScript("if (window.harborVolumeChanged) window.harborVolumeChanged();")
         }
+    }
+
+    private func defaultCompactFrame(size: NSSize) -> NSRect {
+        let visible = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 800, height: 600)
+        return NSRect(x: visible.maxX - size.width - 26, y: visible.maxY - size.height - 26, width: size.width, height: size.height)
+    }
+
+    private func restoredCompactFrame(fallback: NSRect) -> NSRect {
+        guard let value = UserDefaults.standard.string(forKey: compactFrameKey) else {
+            return defaultCompactFrame(size: fallback.size)
+        }
+        var saved = NSRectFromString(value)
+        saved.size = fallback.size
+        if NSScreen.screens.contains(where: { $0.visibleFrame.intersects(saved) }) { return saved }
+        return defaultCompactFrame(size: fallback.size)
+    }
+
+    private func saveCompactFrame() {
+        UserDefaults.standard.set(NSStringFromRect(window.frame), forKey: compactFrameKey)
     }
 
     private func scriptPath() -> String {
@@ -106,6 +133,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         guard let url = navigationAction.request.url, url.scheme == "harbor" else { decisionHandler(.allow); return }
         if url.host == "expand" {
+            saveCompactFrame()
+            isCompact = false
             setWindowChrome(hidden: false)
             window.level = .normal
             let visible = (window.screen ?? NSScreen.main)?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1180, height: 790)
@@ -119,8 +148,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
             setWindowChrome(hidden: true)
             window.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.desktopIconWindow)) + 1)
             window.minSize = NSSize(width: 360, height: 250)
-            let visible = (window.screen ?? NSScreen.main)?.visibleFrame ?? NSRect(x: 0, y: 0, width: 800, height: 600)
-            window.setFrame(NSRect(x: visible.maxX - 386, y: visible.maxY - 276, width: 360, height: 250), display: true, animate: true)
+            isCompact = true
+            let compact = restoredCompactFrame(fallback: NSRect(x: 0, y: 0, width: 360, height: 250))
+            window.setFrame(compact, display: true, animate: true)
             webView.frame = NSRect(x: 0, y: 0, width: 360, height: 250)
             webView.load(URLRequest(url: URL(string: "http://127.0.0.1:\(port)/widget.html")!))
         }
