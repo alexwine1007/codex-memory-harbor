@@ -84,7 +84,7 @@ See [tested-boundaries.md](skills/codex-memory-harbor/references/tested-boundari
 
 ## Privacy
 
-The dashboard exposes metadata required to manage local sessions: path, working directory, task id, parent id, age, and size. It does not display prompt or response bodies. Nothing is uploaded by this project.
+The dashboard exposes metadata required to manage local sessions: Codex's task title, path, working directory, task id, parent id, age, and size. A user-triggered detail card reads only Codex's existing short preview and can open the original task. It does not scan or display full prompt/response bodies. Nothing is uploaded by this project.
 
 ## License
 

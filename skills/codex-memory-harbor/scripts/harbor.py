@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import html
 import json
 import mimetypes
 import os
@@ -12,15 +13,17 @@ from pathlib import Path
 import secrets
 import shutil
 import socket
+import sqlite3
 import subprocess
 import sys
 import threading
 import time
 import urllib.parse
 import webbrowser
+import re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "0.2.1-beta.1"
+VERSION = "0.2.2-beta.1"
 DEFAULT_ARCHIVE = "Codex Memory Harbor"
 
 
@@ -229,6 +232,93 @@ def load_project_catalog(codex_home: Path) -> dict:
     return {"projects": projects, "assignments": assignments, "projectless": projectless}
 
 
+def state_database(codex_home: Path) -> Path | None:
+    candidates = list(codex_home.glob("state_*.sqlite"))
+    try:
+        return max(candidates, key=lambda path: path.stat().st_mtime) if candidates else None
+    except OSError:
+        return None
+
+
+def read_only_database(path: Path) -> sqlite3.Connection:
+    connection = sqlite3.connect(f"file:{urllib.parse.quote(str(path))}?mode=ro", uri=True, timeout=1)
+    connection.row_factory = sqlite3.Row
+    connection.execute("PRAGMA query_only = ON")
+    return connection
+
+
+def clean_index_text(value: str | None, maximum: int | None = None) -> str:
+    text = html.unescape(str(value or ""))
+    match = re.search(r"<input>(.*?)</input>", text, flags=re.DOTALL | re.IGNORECASE)
+    if match:
+        text = match.group(1)
+    text = re.sub(r"<[^>]+>", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    if maximum and len(text) > maximum:
+        text = text[: maximum - 1].rstrip() + "…"
+    return text
+
+
+def compact_task_title(value: str | None) -> str:
+    text = clean_index_text(value)
+    text = re.split(r"\s+\[\d+\]\s+(?:user|assistant):", text, maxsplit=1, flags=re.IGNORECASE)[0].strip()
+    text = re.sub(r"^(这是|请你|请|任务[:：]\s*)", "", text).strip()
+    sentence = re.split(r"(?<=[。！？!?])\s*", text, maxsplit=1)[0] if text else ""
+    return clean_index_text(sentence, 72).rstrip("。！？!? ")
+
+
+def load_thread_catalog(codex_home: Path) -> dict:
+    """Load display titles from Codex's index without reading session bodies."""
+    database = state_database(codex_home)
+    if not database:
+        return {"by_id": {}, "by_path": {}}
+    try:
+        with read_only_database(database) as connection:
+            rows = connection.execute("SELECT id, rollout_path, title, agent_nickname FROM threads").fetchall()
+    except (OSError, sqlite3.Error):
+        return {"by_id": {}, "by_path": {}}
+    by_id, by_path = {}, {}
+    for row in rows:
+        value = {"id": str(row["id"]), "title": compact_task_title(row["title"]), "agent_nickname": str(row["agent_nickname"] or "").strip()}
+        by_id[value["id"]] = value
+        if row["rollout_path"]:
+            by_path[str(Path(row["rollout_path"]).expanduser().absolute())] = value
+    return {"by_id": by_id, "by_path": by_path}
+
+
+def attach_thread_title(item: dict, catalog: dict) -> None:
+    thread = catalog["by_id"].get(str(item.get("id") or "")) or catalog["by_path"].get(str(Path(item["path"]).absolute()))
+    item["title"] = thread["title"] if thread and thread.get("title") else None
+
+
+def thread_detail(codex_home: Path, thread_id: str) -> dict:
+    """Read one requested Codex index preview; never scan the rollout body."""
+    allowed = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
+    if not thread_id or len(thread_id) > 128 or any(char not in allowed for char in thread_id):
+        raise HarborError("Invalid task id")
+    database = state_database(codex_home)
+    if not database:
+        raise HarborError("Codex task index is unavailable")
+    try:
+        with read_only_database(database) as connection:
+            row = connection.execute(
+                "SELECT id, title, preview, cwd, rollout_path, created_at, updated_at, created_at_ms, updated_at_ms, agent_nickname FROM threads WHERE id = ?",
+                (thread_id,),
+            ).fetchone()
+    except sqlite3.Error as exc:
+        raise HarborError("Unable to read the Codex task index") from exc
+    if not row:
+        raise HarborError("Task is not present in the Codex index")
+    created = row["created_at_ms"] or ((row["created_at"] or 0) * 1000)
+    updated = row["updated_at_ms"] or ((row["updated_at"] or 0) * 1000)
+    return {
+        "id": str(row["id"]), "title": compact_task_title(row["title"]) or "未命名任务",
+        "preview": clean_index_text(row["preview"], 520), "cwd": str(row["cwd"] or ""),
+        "rollout_path": str(row["rollout_path"] or ""), "created_at_ms": int(created or 0),
+        "updated_at_ms": int(updated or 0), "agent_nickname": str(row["agent_nickname"] or "").strip(),
+    }
+
+
 def attach_project(item: dict, catalog: dict) -> None:
     thread_ids = [value for value in (item.get("id"), item.get("parent_id")) if value]
     project_id = next((catalog["assignments"].get(value) for value in thread_ids if catalog["assignments"].get(value)), None)
@@ -316,10 +406,12 @@ def scan(codex_home: Path, min_age: float = 30, priority=None, protected_session
     root = codex_home / "sessions"
     sessions = []
     catalog = load_project_catalog(codex_home)
+    thread_catalog = load_thread_catalog(codex_home)
     if root.exists():
         for path in root.rglob("*.jsonl"):
             item = session_record(path, min_age, priority, protected_sessions)
             attach_project(item, catalog)
+            attach_thread_title(item, thread_catalog)
             sessions.append(item)
     sessions.sort(key=lambda item: item["logical"], reverse=True)
     disk = shutil.disk_usage(Path.home())
@@ -477,6 +569,8 @@ class HarborHandler(BaseHTTPRequestHandler):
                 values.add(value) if enabled else values.discard(value); cfg[key] = sorted(values)
                 saved = save_config(cfg["protected_projects"], cfg["protected_sessions"]); self.app["priority"] = "\n".join(saved["protected_projects"]); self.app["protected_sessions"] = saved["protected_sessions"]; self.app["cache"] = None
                 return self.send_json(200, {"ok": True, "settings": saved})
+            if self.path == "/api/task-detail":
+                return self.send_json(200, {"ok": True, "task": thread_detail(self.app["codex_home"], str(data.get("id") or ""))})
             paths = data.get("paths") or []
             if not paths: raise HarborError("No sessions selected")
             results = []

@@ -39,8 +39,12 @@ branch even when its session metadata contains a working directory. Expanding a 
 shows its individual session files, size, age, protection state, and task-level pin. Parent
 checkboxes use mixed state when only some children are selected.
 
-The scanner reads project assignment metadata, timestamps, paths, sizes, completion events,
-and session identifiers. It does not read or index conversation message bodies.
+Task rows use the human-readable title already maintained by Codex. Opening the local detail
+card lazily reads only that task's Codex-generated short preview and can deep-link back to the
+original task in Codex. The inventory never scans full prompt or response bodies.
+
+The scanner reads project assignment metadata, task titles, timestamps, paths, sizes,
+completion events, and session identifiers. It does not read or index conversation bodies.
 
 ## Storage provider boundary
 

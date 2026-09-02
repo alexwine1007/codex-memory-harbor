@@ -131,7 +131,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-        guard let url = navigationAction.request.url, url.scheme == "harbor" else { decisionHandler(.allow); return }
+        guard let url = navigationAction.request.url else { decisionHandler(.allow); return }
+        if url.scheme == "codex" {
+            NSWorkspace.shared.open(url)
+            decisionHandler(.cancel)
+            return
+        }
+        guard url.scheme == "harbor" else { decisionHandler(.allow); return }
         if url.host == "expand" {
             saveCompactFrame()
             isCompact = false

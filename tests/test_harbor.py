@@ -2,6 +2,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import sqlite3
 import tempfile
 import time
 import unittest
@@ -58,6 +59,23 @@ class HarborTests(unittest.TestCase):
             self.assertEqual(item["project_id"],"project-1")
             self.assertEqual(item["project_name"],"Example Project")
             self.assertFalse(item["projectless"])
+    def test_scan_uses_codex_title_index_and_loads_preview_on_demand(self):
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d); path=self.fixture(root)
+            database=root/"state_5.sqlite"
+            with sqlite3.connect(database) as connection:
+                connection.execute("CREATE TABLE threads (id TEXT, rollout_path TEXT, title TEXT, preview TEXT, cwd TEXT, created_at INTEGER, updated_at INTEGER, created_at_ms INTEGER, updated_at_ms INTEGER, agent_nickname TEXT)")
+                connection.execute("INSERT INTO threads VALUES (?,?,?,?,?,?,?,?,?,?)",("child-1",str(path),"Readable task title","Private preview","/tmp/example",1,2,None,None,"Gauss"))
+            item=harbor.scan(root,14)["sessions"][0]
+            self.assertEqual(item["title"],"Readable task title")
+            self.assertNotIn("preview",item)
+            detail=harbor.thread_detail(root,"child-1")
+            self.assertEqual(detail["preview"],"Private preview")
+            self.assertEqual(detail["agent_nickname"],"Gauss")
+    def test_delegation_title_is_compacted_to_its_first_sentence(self):
+        value="<codex_delegation><source_thread_id>abc</source_thread_id><input>这是 EP04 的正式制作任务。继续读取许多内部说明。</input></codex_delegation>"
+        self.assertEqual(harbor.compact_task_title(value),"EP04 的正式制作任务")
+        self.assertEqual(harbor.compact_task_title("修复时间线拖拽 [89] user: 后续无关消息"),"修复时间线拖拽")
     def test_offload_audit_finalize_restore_cycle(self):
         with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as v:
             root=Path(d); p=self.fixture(root); volume=Path(v)
