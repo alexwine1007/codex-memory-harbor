@@ -3,9 +3,11 @@ import json
 import os
 from pathlib import Path
 import sqlite3
+import plistlib
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 SCRIPT = Path(__file__).parents[1] / "skills/codex-memory-harbor/scripts/harbor.py"
 spec = importlib.util.spec_from_file_location("harbor", SCRIPT)
@@ -46,6 +48,13 @@ class HarborTests(unittest.TestCase):
         self.assertFalse(cloud["available"])
         with self.assertRaises(harbor.HarborError):
             harbor.resolve_storage_target({"storage_target":{"provider":"cloud","location":"memory-harbor://future"}})
+    def test_volume_identity_reads_persistent_diskutil_uuid(self):
+        payload=plistlib.dumps({"VolumeUUID":"ABC-123","DeviceIdentifier":"disk9s1","FilesystemType":"exfat"})
+        result=mock.Mock(returncode=0,stdout=payload)
+        with mock.patch.object(harbor.subprocess,"run",return_value=result):
+            identity=harbor.volume_identity(Path("/Volumes/Test"))
+        self.assertEqual(identity["uuid"],"ABC-123")
+        self.assertEqual(identity["device_identifier"],"disk9s1")
     def test_scan_uses_codex_project_assignments_and_preserves_projectless(self):
         with tempfile.TemporaryDirectory() as d:
             root=Path(d); self.fixture(root)
@@ -72,6 +81,72 @@ class HarborTests(unittest.TestCase):
             detail=harbor.thread_detail(root,"child-1")
             self.assertEqual(detail["preview"],"Private preview")
             self.assertEqual(detail["agent_nickname"],"Gauss")
+
+    def test_local_catalog_remains_searchable_after_source_disappears(self):
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d); path=self.fixture(root)
+            database=root/"state_5.sqlite"
+            with sqlite3.connect(database) as connection:
+                connection.execute("CREATE TABLE threads (id TEXT, rollout_path TEXT, title TEXT, preview TEXT, cwd TEXT, created_at INTEGER, updated_at INTEGER, created_at_ms INTEGER, updated_at_ms INTEGER, agent_nickname TEXT)")
+                connection.execute("INSERT INTO threads VALUES (?,?,?,?,?,?,?,?,?,?)",("child-1",str(path),"阿狸牙刷杯鉴定","Private preview","/tmp/example",1,2,None,None,"Gauss"))
+            harbor.scan(root,14)
+            self.assertEqual(harbor.catalog_search(root,"牙刷杯")[0]["thread_id"],"child-1")
+            path.unlink()
+            harbor.scan(root,14)
+            result=harbor.catalog_search(root,"牙刷杯")[0]
+            self.assertEqual(result["source_present"],0)
+            self.assertEqual(harbor.catalog_status(root)["items"],1)
+
+    def test_external_manifest_rebuilds_searchable_catalog(self):
+        with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as v:
+            root=Path(d); volume=Path(v); manifest=volume/"Codex Memory Harbor/manifests/offload_manifest.jsonl"
+            manifest.parent.mkdir(parents=True)
+            manifest.write_text(json.dumps({
+                "manifest_version":2,"source":str(root/"sessions/missing.jsonl"),"id":"archived-1",
+                "title":"关键历史数据","cwd":"/tmp/archive","bytes":42,"sha256":"abc",
+                "archive_relative":"Codex Memory Harbor/sessions/missing.jsonl","recorded_at":123,
+            })+"\n")
+            count=harbor.import_mounted_manifests(root,[{"path":str(volume),"name":"Archive","uuid":"VOL-1"}])
+            self.assertEqual(count,1)
+            result=harbor.catalog_search(root,"关键历史")[0]
+            self.assertEqual(result["volume_uuid"],"VOL-1")
+            self.assertEqual(result["archive_relative"],"Codex Memory Harbor/sessions/missing.jsonl")
+
+    def test_broken_link_repairs_only_with_uuid_and_hash_match(self):
+        with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as v:
+            root=Path(d); source=root/"sessions/2026/01/01/rollout-child.jsonl"; source.parent.mkdir(parents=True)
+            source.symlink_to("/Volumes/Old Name/Codex Memory Harbor/sessions/rollout-child.jsonl")
+            volume=Path(v); target=volume/"Codex Memory Harbor/sessions/rollout-child.jsonl"; target.parent.mkdir(parents=True)
+            target.write_text("verified payload")
+            with harbor.open_catalog(root) as connection:
+                harbor.catalog_upsert(connection,{
+                    "source_path":str(source),"thread_id":"child-1","title":"Repair me","linked":True,
+                    "source_present":True,"logical":target.stat().st_size,"source_sha256":harbor.sha256(target),
+                    "volume_uuid":"VOL-1","archive_relative":"Codex Memory Harbor/sessions/rollout-child.jsonl",
+                })
+            repaired=harbor.repair_links_by_volume_identity(root,[{"path":str(volume),"name":"New Name","uuid":"VOL-1"}])
+            self.assertEqual(len(repaired),1)
+            self.assertEqual(source.resolve(),target.resolve())
+            self.assertEqual(source.read_text(),"verified payload")
+
+    def test_scan_does_not_repair_links_as_a_side_effect(self):
+        with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as v:
+            root=Path(d); source=root/"sessions/2026/01/01/rollout-child.jsonl"; source.parent.mkdir(parents=True)
+            source.symlink_to("/Volumes/Old Name/Codex Memory Harbor/sessions/rollout-child.jsonl")
+            volume=Path(v); target=volume/"Codex Memory Harbor/sessions/rollout-child.jsonl"; target.parent.mkdir(parents=True)
+            target.write_text("verified payload")
+            with harbor.open_catalog(root) as connection:
+                harbor.catalog_upsert(connection,{
+                    "source_path":str(source),"thread_id":"child-1","title":"Do not auto repair","linked":True,
+                    "source_present":True,"logical":target.stat().st_size,"source_sha256":harbor.sha256(target),
+                    "volume_uuid":"VOL-1","archive_relative":"Codex Memory Harbor/sessions/rollout-child.jsonl",
+                })
+            volumes=[{"path":str(volume),"name":"New Name","uuid":"VOL-1","writable":True,"free":1,"free_h":"1 B"}]
+            with mock.patch.object(harbor,"available_volumes",return_value=volumes):
+                harbor.scan(root,14)
+            self.assertTrue(source.is_symlink())
+            self.assertFalse(source.exists())
+            self.assertEqual(os.readlink(source),"/Volumes/Old Name/Codex Memory Harbor/sessions/rollout-child.jsonl")
 
     def test_subagent_record_excludes_inherited_parent_history(self):
         with tempfile.TemporaryDirectory() as d:

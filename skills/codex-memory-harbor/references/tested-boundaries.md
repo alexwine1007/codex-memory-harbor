@@ -29,4 +29,12 @@
 - Memory Harbor 0.2.3-beta.1 detects these sub-agent records, removes the misleading direct-open action, and instead exposes their task-specific outward reports on demand while excluding inherited parent history and raw tool output.
 - On the two affected tasks, the in-app record view recovered the correct task identities (`ep03 evidence audit`, `ep04 starter audit`) and their final reports from the external targets. Ordinary user tasks retain the direct Codex-open action; sub-agent records provide an action to open the owning parent task.
 
+## Local discovery and volume identity, 2026-09-03
+
+- Memory Harbor 0.3.0-beta.1 passed 15 local unit tests, Python bytecode compilation, and JavaScript syntax validation.
+- A fresh local SQLite catalog remained searchable after its source session file disappeared. A mounted external manifest rebuilt a missing catalog entry without indexing conversation bodies.
+- A synthetic renamed-volume test repaired a broken absolute symlink only when persistent volume UUID, byte length, and SHA-256 all matched.
+- On this Mac, a real scan cataloged 516 task records, imported four relevant external manifest records, and found two EP03 records by title. The attached Alex's Disk exposed persistent UUID `416F6307-4C31-3150-8734-75B3C9733EDB`.
+- A physical volume rename followed by automatic link repair has not yet been performed. The link-repair result above is unit-test evidence, not a claim that this destructive-environment scenario has been accepted on the user's drive.
+
 Do not describe unverified cases as supported. Preserve rollback copies until the local machine passes its own restart and remount checks.

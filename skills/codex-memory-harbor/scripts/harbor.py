@@ -10,6 +10,7 @@ import json
 import mimetypes
 import os
 from pathlib import Path
+import plistlib
 import secrets
 import shutil
 import socket
@@ -22,10 +23,13 @@ import urllib.parse
 import webbrowser
 import re
 from collections import deque
+from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "0.2.3-beta.1"
+VERSION = "0.3.0-beta.1"
 DEFAULT_ARCHIVE = "Codex Memory Harbor"
+CATALOG_SCHEMA_VERSION = 1
+MANIFEST_SCHEMA_VERSION = 2
 
 
 class HarborError(RuntimeError):
@@ -34,6 +38,11 @@ class HarborError(RuntimeError):
 
 def config_path() -> Path:
     return Path(os.environ.get("CODEX_HARBOR_CONFIG", "~/.config/codex-memory-harbor/config.json")).expanduser()
+
+
+def catalog_path(codex_home: Path) -> Path:
+    override = os.environ.get("CODEX_HARBOR_CATALOG")
+    return Path(override).expanduser() if override else codex_home / "memory-harbor" / "catalog.sqlite3"
 
 
 def load_config() -> dict:
@@ -166,6 +175,33 @@ def mounted_volume(path_value: str) -> Path:
     return volume
 
 
+def volume_identity(volume: Path) -> dict:
+    """Return a persistent macOS volume identity when Disk Arbitration exposes one."""
+    identity = {"uuid": "", "device_identifier": "", "filesystem": ""}
+    try:
+        result = subprocess.run(
+            ["diskutil", "info", "-plist", str(volume)],
+            capture_output=True,
+            check=False,
+            timeout=3,
+        )
+        if result.returncode == 0 and result.stdout:
+            value = plistlib.loads(result.stdout)
+            identity["uuid"] = str(value.get("VolumeUUID") or value.get("APFSVolumeUUID") or value.get("MediaUUID") or "")
+            identity["device_identifier"] = str(value.get("DeviceIdentifier") or "")
+            identity["filesystem"] = str(value.get("FilesystemType") or value.get("FileSystemPersonality") or "")
+    except (OSError, subprocess.SubprocessError, plistlib.InvalidFileException, ValueError):
+        pass
+    if not identity["uuid"]:
+        # This fallback is only a live-session hint. It is never presented as a
+        # restart-persistent UUID and is not used to auto-repair links.
+        try:
+            identity["runtime_id"] = f"dev:{volume.stat().st_dev}"
+        except OSError:
+            identity["runtime_id"] = ""
+    return identity
+
+
 def available_volumes() -> list[dict]:
     result = []
     root = Path("/Volumes")
@@ -179,12 +215,20 @@ def available_volumes() -> list[dict]:
             writable = os.access(volume, os.W_OK)
         except OSError:
             continue
-        result.append({"path": str(volume), "name": volume.name, "free": usage.free, "free_h": human_bytes(usage.free), "writable": writable})
+        identity = volume_identity(volume)
+        result.append({
+            "path": str(volume), "name": volume.name, "free": usage.free,
+            "free_h": human_bytes(usage.free), "writable": writable,
+            "uuid": identity.get("uuid", ""), "runtime_id": identity.get("runtime_id", ""),
+            "device_identifier": identity.get("device_identifier", ""),
+            "filesystem": identity.get("filesystem", ""),
+        })
     return result
 
 
-def available_storage_targets() -> list[dict]:
+def available_storage_targets(volumes: list[dict] | None = None) -> list[dict]:
     """Stable provider boundary: cloud backends can implement this contract later."""
+    volumes = available_volumes() if volumes is None else volumes
     targets = [
         {
             "id": f"external:{volume['path']}",
@@ -194,8 +238,10 @@ def available_storage_targets() -> list[dict]:
             "available": volume["writable"],
             "free": volume["free"],
             "free_h": volume["free_h"],
+            "volume_uuid": volume.get("uuid", ""),
+            "device_identifier": volume.get("device_identifier", ""),
         }
-        for volume in available_volumes()
+        for volume in volumes
     ]
     targets.append({
         "id": "cloud:future",
@@ -295,6 +341,342 @@ def load_thread_catalog(codex_home: Path) -> dict:
         if row["rollout_path"]:
             by_path[str(Path(row["rollout_path"]).expanduser().absolute())] = value
     return {"by_id": by_id, "by_path": by_path}
+
+
+def open_catalog(codex_home: Path) -> sqlite3.Connection:
+    path = catalog_path(codex_home)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(path, timeout=5)
+    connection.row_factory = sqlite3.Row
+    connection.execute("PRAGMA journal_mode = WAL")
+    connection.execute("PRAGMA synchronous = FULL")
+    connection.execute("""
+        CREATE TABLE IF NOT EXISTS harbor_items (
+            source_path TEXT PRIMARY KEY,
+            thread_id TEXT,
+            parent_id TEXT,
+            title TEXT NOT NULL DEFAULT '',
+            project_id TEXT,
+            project_name TEXT,
+            project_path TEXT,
+            cwd TEXT NOT NULL DEFAULT '',
+            agent_path TEXT NOT NULL DEFAULT '',
+            timestamp TEXT,
+            kind TEXT NOT NULL DEFAULT '',
+            logical INTEGER NOT NULL DEFAULT 0,
+            source_sha256 TEXT NOT NULL DEFAULT '',
+            linked INTEGER NOT NULL DEFAULT 0,
+            source_present INTEGER NOT NULL DEFAULT 0,
+            target_path TEXT,
+            target_available INTEGER NOT NULL DEFAULT 0,
+            volume_uuid TEXT NOT NULL DEFAULT '',
+            volume_name TEXT NOT NULL DEFAULT '',
+            archive_relative TEXT NOT NULL DEFAULT '',
+            manifest_path TEXT NOT NULL DEFAULT '',
+            last_seen_at INTEGER NOT NULL DEFAULT 0,
+            manifest_recorded_at INTEGER NOT NULL DEFAULT 0
+        )
+    """)
+    connection.execute("CREATE INDEX IF NOT EXISTS harbor_items_thread_id ON harbor_items(thread_id)")
+    connection.execute("CREATE INDEX IF NOT EXISTS harbor_items_project_id ON harbor_items(project_id)")
+    connection.execute("CREATE TABLE IF NOT EXISTS harbor_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+    connection.execute(
+        "INSERT OR REPLACE INTO harbor_meta(key, value) VALUES ('schema_version', ?)",
+        (str(CATALOG_SCHEMA_VERSION),),
+    )
+    tokenizer_row = connection.execute("SELECT value FROM harbor_meta WHERE key='fts_tokenizer'").fetchone()
+    tokenizer = tokenizer_row[0] if tokenizer_row and tokenizer_row[0] in ("trigram", "unicode61") else None
+    if tokenizer is None:
+        try:
+            connection.execute("""
+                CREATE VIRTUAL TABLE harbor_fts USING fts5(
+                    source_path UNINDEXED, thread_id, title, project_name, cwd, agent_path,
+                    tokenize='trigram'
+                )
+            """)
+            tokenizer = "trigram"
+        except sqlite3.Error:
+            connection.execute("""
+                CREATE VIRTUAL TABLE IF NOT EXISTS harbor_fts USING fts5(
+                    source_path UNINDEXED, thread_id, title, project_name, cwd, agent_path
+                )
+            """)
+            tokenizer = "unicode61"
+        connection.execute("INSERT OR REPLACE INTO harbor_meta(key, value) VALUES ('fts_tokenizer', ?)", (tokenizer,))
+    elif tokenizer == "trigram":
+        connection.execute("""
+            CREATE VIRTUAL TABLE IF NOT EXISTS harbor_fts USING fts5(
+                source_path UNINDEXED, thread_id, title, project_name, cwd, agent_path,
+                tokenize='trigram'
+            )
+        """)
+    else:
+        connection.execute("""
+            CREATE VIRTUAL TABLE IF NOT EXISTS harbor_fts USING fts5(
+                source_path UNINDEXED, thread_id, title, project_name, cwd, agent_path
+            )
+        """)
+    return connection
+
+
+@contextmanager
+def managed_catalog(codex_home: Path):
+    connection = open_catalog(codex_home)
+    try:
+        with connection:
+            yield connection
+    finally:
+        connection.close()
+
+
+def catalog_upsert(connection: sqlite3.Connection, record: dict) -> None:
+    source_path = str(record.get("source_path") or record.get("source") or record.get("path") or "")
+    if not source_path:
+        return
+    existing = connection.execute("SELECT * FROM harbor_items WHERE source_path = ?", (source_path,)).fetchone()
+    old = dict(existing) if existing else {}
+    def keep(name, default=""):
+        value = record.get(name)
+        return value if value not in (None, "") else old.get(name, default)
+    values = {
+        "source_path": source_path,
+        "thread_id": keep("thread_id", record.get("id") or ""),
+        "parent_id": keep("parent_id"),
+        "title": keep("title"),
+        "project_id": keep("project_id"),
+        "project_name": keep("project_name"),
+        "project_path": keep("project_path"),
+        "cwd": keep("cwd"),
+        "agent_path": keep("agent_path"),
+        "timestamp": keep("timestamp"),
+        "kind": keep("kind"),
+        "logical": int(record.get("logical", record.get("bytes", old.get("logical", 0))) or 0),
+        "source_sha256": keep("source_sha256", record.get("sha256") or ""),
+        "linked": int(bool(record.get("linked", old.get("linked", False)))),
+        "source_present": int(bool(record.get("source_present", old.get("source_present", False)))),
+        "target_path": keep("target_path", record.get("target") or record.get("destination") or ""),
+        "target_available": int(bool(record.get("target_available", record.get("target_exists", old.get("target_available", False))))),
+        "volume_uuid": keep("volume_uuid"),
+        "volume_name": keep("volume_name"),
+        "archive_relative": keep("archive_relative"),
+        "manifest_path": keep("manifest_path", record.get("manifest") or ""),
+        "last_seen_at": int(record.get("last_seen_at", int(time.time())) or 0),
+        "manifest_recorded_at": int(record.get("manifest_recorded_at", record.get("recorded_at", old.get("manifest_recorded_at", 0))) or 0),
+    }
+    columns = list(values)
+    placeholders = ", ".join("?" for _ in columns)
+    updates = ", ".join(f"{column}=excluded.{column}" for column in columns if column != "source_path")
+    connection.execute(
+        f"INSERT INTO harbor_items ({', '.join(columns)}) VALUES ({placeholders}) "
+        f"ON CONFLICT(source_path) DO UPDATE SET {updates}",
+        tuple(values[column] for column in columns),
+    )
+    connection.execute("DELETE FROM harbor_fts WHERE source_path = ?", (source_path,))
+    connection.execute(
+        "INSERT INTO harbor_fts(source_path, thread_id, title, project_name, cwd, agent_path) VALUES (?, ?, ?, ?, ?, ?)",
+        (source_path, values["thread_id"], values["title"], values["project_name"], values["cwd"], values["agent_path"]),
+    )
+
+
+def catalog_update_from_scan(codex_home: Path, sessions: list[dict], volumes: list[dict] | None = None) -> dict:
+    now = int(time.time())
+    volumes = available_volumes() if volumes is None else volumes
+    with managed_catalog(codex_home) as connection:
+        connection.execute("UPDATE harbor_items SET source_present = 0")
+        mounted_uuids = [str(volume.get("uuid")) for volume in volumes if volume.get("uuid")]
+        if mounted_uuids:
+            placeholders = ",".join("?" for _ in mounted_uuids)
+            connection.execute(
+                f"UPDATE harbor_items SET target_available = 0 WHERE volume_uuid != '' AND volume_uuid NOT IN ({placeholders})",
+                tuple(mounted_uuids),
+            )
+        else:
+            connection.execute("UPDATE harbor_items SET target_available = 0 WHERE volume_uuid != ''")
+        for item in sessions:
+            target = str(item.get("target") or "")
+            volume = next((value for value in volumes if target == value["path"] or target.startswith(value["path"] + os.sep)), None)
+            archive_relative = ""
+            if volume and target:
+                try:
+                    archive_relative = str(Path(target).relative_to(Path(volume["path"])))
+                except ValueError:
+                    pass
+            catalog_upsert(connection, {
+                "source_path": item["path"], "thread_id": item.get("id"),
+                "parent_id": item.get("parent_id"), "title": item.get("title"),
+                "project_id": item.get("project_id"), "project_name": item.get("project_name"),
+                "project_path": item.get("project_path"), "cwd": item.get("cwd"),
+                "agent_path": item.get("agent_path"), "timestamp": item.get("timestamp"),
+                "kind": item.get("kind"), "logical": item.get("logical"),
+                "linked": item.get("linked"), "source_present": True,
+                "target_path": item.get("target"), "target_available": item.get("target_exists"),
+                "volume_uuid": volume.get("uuid", "") if volume else "",
+                "volume_name": volume.get("name", "") if volume else "",
+                "archive_relative": archive_relative,
+                "last_seen_at": now,
+            })
+        count = connection.execute("SELECT COUNT(*) FROM harbor_items").fetchone()[0]
+    return {"path": str(catalog_path(codex_home)), "items": count, "updated_at": now}
+
+
+def catalog_search(codex_home: Path, query: str, limit: int = 20) -> list[dict]:
+    query = clean_index_text(query, 300)
+    if not query:
+        return []
+    limit = max(1, min(int(limit), 100))
+    with managed_catalog(codex_home) as connection:
+        try:
+            phrase = '"' + query.replace('"', '""') + '"'
+            rows = connection.execute("""
+                SELECT i.*, bm25(harbor_fts) AS score
+                FROM harbor_fts JOIN harbor_items i USING(source_path)
+                WHERE harbor_fts MATCH ?
+                ORDER BY score, i.last_seen_at DESC LIMIT ?
+            """, (phrase, limit)).fetchall()
+        except sqlite3.Error:
+            rows = []
+        if not rows:
+            needle = f"%{query}%"
+            rows = connection.execute("""
+                SELECT *, 0.0 AS score FROM harbor_items
+                WHERE title LIKE ? OR project_name LIKE ? OR cwd LIKE ?
+                   OR thread_id LIKE ? OR agent_path LIKE ?
+                ORDER BY last_seen_at DESC LIMIT ?
+            """, (needle, needle, needle, needle, needle, limit)).fetchall()
+    return [dict(row) for row in rows]
+
+
+def catalog_status(codex_home: Path) -> dict:
+    with managed_catalog(codex_home) as connection:
+        row = connection.execute("""
+            SELECT COUNT(*) AS items,
+                   SUM(source_present) AS present,
+                   SUM(linked) AS linked,
+                   SUM(target_available) AS targets_available,
+                   MAX(last_seen_at) AS updated_at
+            FROM harbor_items
+        """).fetchone()
+        tokenizer = connection.execute("SELECT value FROM harbor_meta WHERE key='fts_tokenizer'").fetchone()
+    return {
+        "path": str(catalog_path(codex_home)), "schema_version": CATALOG_SCHEMA_VERSION,
+        "items": int(row["items"] or 0), "present": int(row["present"] or 0),
+        "linked": int(row["linked"] or 0), "targets_available": int(row["targets_available"] or 0),
+        "updated_at": int(row["updated_at"] or 0), "fts_tokenizer": tokenizer[0] if tokenizer else "unknown",
+    }
+
+
+def manifest_relative(record: dict, archive_name: str) -> str:
+    relative = str(record.get("archive_relative") or "").lstrip("/")
+    if relative:
+        return relative
+    destination = Path(str(record.get("destination") or record.get("target") or ""))
+    parts = destination.parts
+    try:
+        index = parts.index(archive_name)
+        return str(Path(*parts[index:]))
+    except ValueError:
+        return ""
+
+
+def import_mounted_manifests(codex_home: Path, volumes: list[dict], archive_name: str = DEFAULT_ARCHIVE) -> int:
+    """Merge external manifests into the rebuildable local catalog."""
+    imported = 0
+    thread_catalog = load_thread_catalog(codex_home)
+    project_catalog = load_project_catalog(codex_home)
+    with managed_catalog(codex_home) as connection:
+        for volume in volumes:
+            manifest = Path(volume["path"]) / archive_name / "manifests" / "offload_manifest.jsonl"
+            if not manifest.is_file():
+                continue
+            try:
+                lines = manifest.read_text(encoding="utf-8", errors="replace").splitlines()
+            except OSError:
+                continue
+            for line in lines:
+                try:
+                    raw = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                source = str(raw.get("source") or "")
+                relative = manifest_relative(raw, archive_name)
+                if not source or not relative:
+                    continue
+                try:
+                    lexical_session(source, codex_home)
+                except HarborError:
+                    # A removable disk may contain manifests from several Macs
+                    # or CODEX_HOME roots. Never merge another root into this one.
+                    continue
+                target = Path(volume["path"]) / relative
+                item = {
+                    "path": source, "id": raw.get("id"), "parent_id": raw.get("parent_id"),
+                    "cwd": raw.get("cwd") or "", "agent_path": raw.get("agent_path") or "",
+                    "timestamp": raw.get("timestamp"), "kind": raw.get("kind") or "child",
+                }
+                attach_thread_title(item, thread_catalog)
+                attach_project(item, project_catalog)
+                catalog_upsert(connection, {
+                    "source_path": source, "thread_id": item.get("id"), "parent_id": item.get("parent_id"),
+                    "title": raw.get("title") or item.get("title"), "project_id": raw.get("project_id") or item.get("project_id"),
+                    "project_name": raw.get("project_name") or item.get("project_name"),
+                    "project_path": raw.get("project_path") or item.get("project_path"),
+                    "cwd": item.get("cwd"), "agent_path": item.get("agent_path"), "timestamp": item.get("timestamp"),
+                    "kind": item.get("kind"), "logical": raw.get("bytes", 0), "source_sha256": raw.get("sha256"),
+                    "linked": Path(source).is_symlink(), "source_present": Path(source).exists() or Path(source).is_symlink(),
+                    "target_path": str(target), "target_available": target.is_file(),
+                    "volume_uuid": raw.get("volume_uuid") or volume.get("uuid", ""),
+                    "volume_name": raw.get("volume_name") or volume.get("name", ""),
+                    "archive_relative": relative, "manifest_path": str(manifest),
+                    "manifest_recorded_at": raw.get("recorded_at", 0),
+                })
+                imported += 1
+    return imported
+
+
+def repair_links_by_volume_identity(codex_home: Path, volumes: list[dict]) -> list[dict]:
+    """Repair broken absolute links only after UUID and content hash both match."""
+    mounted = {str(volume.get("uuid")): volume for volume in volumes if volume.get("uuid")}
+    repaired = []
+    if not mounted or not catalog_path(codex_home).is_file():
+        return repaired
+    with managed_catalog(codex_home) as connection:
+        rows = connection.execute("""
+            SELECT * FROM harbor_items
+            WHERE linked = 1 AND volume_uuid != '' AND archive_relative != '' AND source_sha256 != ''
+        """).fetchall()
+        for row in rows:
+            source = Path(row["source_path"])
+            if not source.is_symlink() or source.exists():
+                continue
+            volume = mounted.get(str(row["volume_uuid"]))
+            if not volume:
+                continue
+            target = Path(volume["path"]) / row["archive_relative"]
+            try:
+                if not target.is_file() or target.stat().st_size != int(row["logical"] or 0):
+                    continue
+                if sha256(target) != row["source_sha256"]:
+                    continue
+                temporary = source.with_name(source.name + ".harbor-link-temp")
+                temporary.unlink(missing_ok=True)
+                temporary.symlink_to(target)
+                os.replace(temporary, source)
+                connection.execute(
+                    "UPDATE harbor_items SET target_path=?, target_available=1, volume_name=?, last_seen_at=? WHERE source_path=?",
+                    (str(target), volume.get("name", ""), int(time.time()), str(source)),
+                )
+                repaired.append({"source": str(source), "target": str(target), "volume_uuid": row["volume_uuid"]})
+            except OSError:
+                continue
+    return repaired
+
+
+def rebuild_catalog(codex_home: Path, min_age: float = 30, priority=None, protected_sessions=None) -> dict:
+    path = catalog_path(codex_home)
+    for suffix in ("", "-wal", "-shm"):
+        Path(str(path) + suffix).unlink(missing_ok=True)
+    result = scan(codex_home, min_age, priority, protected_sessions)
+    return {"catalog": result["catalog"], "sessions_scanned": len(result["sessions"]), "rebuilt": True}
 
 
 def attach_thread_title(item: dict, catalog: dict) -> None:
@@ -490,6 +872,8 @@ def session_record(path: Path, min_age: float, priority=None, protected_sessions
 def scan(codex_home: Path, min_age: float = 30, priority=None, protected_sessions=None) -> dict:
     root = codex_home / "sessions"
     sessions = []
+    volumes = available_volumes()
+    imported_manifests = import_mounted_manifests(codex_home, volumes)
     catalog = load_project_catalog(codex_home)
     thread_catalog = load_thread_catalog(codex_home)
     if root.exists():
@@ -510,11 +894,14 @@ def scan(codex_home: Path, min_age: float = 30, priority=None, protected_session
     }
     for key in ("logical", "local_allocated", "eligible", "rollback"):
         totals[key + "_h"] = human_bytes(totals[key])
+    catalog_result = catalog_update_from_scan(codex_home, sessions, volumes)
+    catalog_result["manifests_imported"] = imported_manifests
     return {
         "version": VERSION, "codex_home": str(codex_home), "priority": priority or "", "min_age": min_age,
         "disk": {"free": disk.free, "free_h": human_bytes(disk.free), "total": disk.total, "used": disk.used,
                  "used_percent": round(disk.used / disk.total * 100, 1)},
-        "totals": totals, "volumes": available_volumes(), "storage_targets": available_storage_targets(), "sessions": sessions, "generated_at": int(time.time()),
+        "totals": totals, "volumes": volumes, "storage_targets": available_storage_targets(volumes),
+        "catalog": catalog_result, "sessions": sessions, "generated_at": int(time.time()),
     }
 
 
@@ -533,17 +920,30 @@ def plan_offload(path_value: str, codex_home: Path, volume_value: str, archive_n
     if source.is_symlink() or not source.is_file():
         raise HarborError("Source must be a local regular session file")
     item = session_record(source, min_age, priority, protected_sessions)
+    attach_project(item, load_project_catalog(codex_home))
+    attach_thread_title(item, load_thread_catalog(codex_home))
     if not item["eligible"]:
         raise HarborError("Session is not eligible: " + ", ".join(item["reasons"]))
     handles = open_handles(source)
     if handles:
         raise HarborError(f"Session has {handles} open handles")
     destination = volume / archive_name / "sessions" / relative
+    identity = volume_identity(volume)
     backup = source.with_name(source.name + ".offload-local-backup")
     if backup.exists() or backup.is_symlink():
         raise HarborError(f"Rollback copy already exists: {backup}")
-    return {"source": str(source), "destination": str(destination), "backup": str(backup), "bytes": source.stat().st_size,
-            "bytes_h": human_bytes(source.stat().st_size), "sha256": sha256(source), "id": item["id"], "cwd": item["cwd"], "open_handles": handles}
+    return {
+        "manifest_version": MANIFEST_SCHEMA_VERSION,
+        "source": str(source), "destination": str(destination), "archive_relative": str(destination.relative_to(volume)),
+        "backup": str(backup), "bytes": source.stat().st_size,
+        "bytes_h": human_bytes(source.stat().st_size), "sha256": sha256(source),
+        "id": item["id"], "parent_id": item.get("parent_id"), "kind": item.get("kind"),
+        "title": item.get("title") or "", "cwd": item["cwd"], "agent_path": item.get("agent_path") or "",
+        "timestamp": item.get("timestamp"), "project_id": item.get("project_id"),
+        "project_name": item.get("project_name"), "project_path": item.get("project_path"),
+        "volume_uuid": identity.get("uuid", ""), "volume_name": volume.name,
+        "device_identifier": identity.get("device_identifier", ""), "open_handles": handles,
+    }
 
 
 def offload_one(plan: dict, volume: Path, archive_name: str) -> dict:
@@ -633,6 +1033,13 @@ class HarborHandler(BaseHTTPRequestHandler):
             return self.send_json(200, {"volumes": available_volumes(), "generated_at": int(time.time())})
         if parsed.path == "/api/storage-targets":
             return self.send_json(200, {"storage_targets": available_storage_targets(), "generated_at": int(time.time())})
+        if parsed.path == "/api/catalog":
+            return self.send_json(200, {"catalog": catalog_status(self.app["codex_home"])})
+        if parsed.path == "/api/search":
+            q = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
+            query = q.get("q", [""])[0]
+            limit = int(q.get("limit", ["30"])[0])
+            return self.send_json(200, {"query": query, "results": catalog_search(self.app["codex_home"], query, limit)})
         if parsed.path == "/api/config": return self.send_json(200, {"token": self.app["token"], "version": VERSION, "priority": self.app["priority"], "protected_projects": parse_projects(self.app["priority"]), "protected_sessions": self.app["protected_sessions"]})
         asset = "index.html" if parsed.path in ("/", "") else parsed.path.lstrip("/")
         file = (self.app["assets"] / asset).resolve()
@@ -658,6 +1065,14 @@ class HarborHandler(BaseHTTPRequestHandler):
                 return self.send_json(200, {"ok": True, "task": thread_detail(self.app["codex_home"], str(data.get("id") or ""))})
             if self.path == "/api/task-record":
                 return self.send_json(200, {"ok": True, "record": task_record(self.app["codex_home"], str(data.get("id") or ""))})
+            if self.path == "/api/rebuild-catalog":
+                result = rebuild_catalog(self.app["codex_home"], 30, self.app["priority"] or None, self.app["protected_sessions"])
+                self.app["cache"] = None
+                return self.send_json(200, {"ok": True, **result})
+            if self.path == "/api/repair-links":
+                repaired = repair_links_by_volume_identity(self.app["codex_home"], available_volumes())
+                self.app["cache"] = None
+                return self.send_json(200, {"ok": True, "repaired": repaired})
             paths = data.get("paths") or []
             if not paths: raise HarborError("No sessions selected")
             results = []
@@ -701,6 +1116,10 @@ def main() -> int:
     scan_p = sub.add_parser("scan"); scan_p.add_argument("--min-age", type=float, default=30); scan_p.add_argument("--priority")
     serve_p = sub.add_parser("serve"); serve_p.add_argument("--port", type=int, default=48765); serve_p.add_argument("--open", action="store_true")
     audit_p = sub.add_parser("audit"); audit_p.add_argument("path")
+    search_p = sub.add_parser("search"); search_p.add_argument("query"); search_p.add_argument("--limit", type=int, default=20)
+    sub.add_parser("rebuild-index")
+    sub.add_parser("index-status")
+    sub.add_parser("repair-links")
     args = parser.parse_args()
     home = Path(args.codex_home or os.environ.get("CODEX_HOME", "~/.codex")).expanduser().absolute()
     try:
@@ -709,6 +1128,16 @@ def main() -> int:
             print(json.dumps(scan(home, args.min_age, projects, config["protected_sessions"]), ensure_ascii=False, indent=2))
         elif args.command == "serve": serve(args)
         elif args.command == "audit": print(json.dumps(audit_one(args.path, home), ensure_ascii=False, indent=2))
+        elif args.command == "search":
+            if not catalog_path(home).is_file():
+                config = load_config(); scan(home, 30, config["protected_projects"], config["protected_sessions"])
+            print(json.dumps({"query": args.query, "results": catalog_search(home, args.query, args.limit)}, ensure_ascii=False, indent=2))
+        elif args.command == "rebuild-index":
+            config = load_config(); print(json.dumps(rebuild_catalog(home, 30, config["protected_projects"], config["protected_sessions"]), ensure_ascii=False, indent=2))
+        elif args.command == "index-status": print(json.dumps(catalog_status(home), ensure_ascii=False, indent=2))
+        elif args.command == "repair-links":
+            volumes = available_volumes(); import_mounted_manifests(home, volumes)
+            print(json.dumps({"repaired": repair_links_by_volume_identity(home, volumes)}, ensure_ascii=False, indent=2))
     except (HarborError, OSError, ValueError, json.JSONDecodeError) as exc:
         print(f"error: {exc}", file=sys.stderr); return 1
     return 0

@@ -6,6 +6,9 @@ let frozenProjectOrder=null;
 let config={protected_projects:[],protected_sessions:[]};
 let activeTaskId='';
 let activeTask=null;
+let searchMatches=null;
+let searchResults=[];
+let searchTimer=0;
 const selected=new Set();
 const recommended=new Set();
 const pinnedInView=new Set();
@@ -18,9 +21,19 @@ function toast(message,bad=false){const element=$('#toast');element.textContent=
 async function init(){const response=await fetch('/api/config').then(result=>result.json());token=response.token;config=response;bindStoragePicker();await refresh()}
 async function refresh(resetOrder=true){if(resetOrder){frozenProjectOrder=null;pinnedInView.clear();expandedGroups.clear()}data=await fetch('/api/scan?'+new URLSearchParams({min_age:30})).then(result=>result.json());render()}
 function isProtectedProject(path){return(config.protected_projects||[]).some(project=>path===project||path.startsWith(project+'/'))}
+function indexedItems(){
+  if(!searchMatches)return data.sessions;
+  const known=new Set(data.sessions.map(item=>item.path));
+  const indexed=searchResults.filter(item=>!known.has(item.source_path)).map(item=>{
+    const timestamp=item.timestamp?new Date(item.timestamp):null;
+    const age=timestamp&&!Number.isNaN(timestamp.getTime())?Math.max(0,Math.round((Date.now()-timestamp.getTime())/8640000)/10):null;
+    return{path:item.source_path,name:item.source_path.split('/').pop()||'索引记录',id:item.thread_id,parent_id:item.parent_id,title:item.title,project_id:item.project_id,project_name:item.project_name,project_path:item.project_path,cwd:item.cwd,agent_path:item.agent_path,timestamp:item.timestamp,kind:item.kind||'child',logical:Number(item.logical)||0,logical_h:fmt(Number(item.logical)||0),age_days:age,linked:Boolean(item.linked),target:item.target_path,target_exists:Boolean(item.target_available),source_present:Boolean(item.source_present),catalog_only:true,eligible:false,last_turn_complete:true,protected_session:false,protected_project:false};
+  });
+  return[...data.sessions,...indexed];
+}
 function groups(){
   const map=new Map();
-  for(const item of data.sessions){
+  for(const item of indexedItems()){
     const standalone=!item.project_id;
     const key=standalone?'__standalone__':item.project_id;
     const group=map.get(key)||{key,name:standalone?'未归类任务':item.project_name||'未命名项目',path:standalone?'':item.project_path||item.cwd,standalone,items:[],size:0,eligible:0,linked:0,recentDays:Infinity,protected:false};
@@ -33,11 +46,12 @@ function groups(){
   return[...map.values()].sort((a,b)=>sortBy==='recent'?oldestVisible(b)-oldestVisible(a)||amount(b)-amount(a):amount(b)-amount(a)||b.recentDays-a.recentDays);
 }
 function visibleItems(group){
-  const items=group.items.filter(item=>filter==='all'||filter==='eligible'&&item.eligible||filter==='recommended'&&item.eligible&&recommended.has(item.path)||filter==='linked'&&item.linked);
-  return items.sort((a,b)=>sortBy==='recent'?b.age_days-a.age_days||b.logical-a.logical:b.logical-a.logical||b.age_days-a.age_days);
+  const items=group.items.filter(item=>searchMatches?searchMatches.has(item.path):filter==='all'||filter==='eligible'&&item.eligible||filter==='recommended'&&item.eligible&&recommended.has(item.path)||filter==='linked'&&item.linked);
+  const age=item=>item.age_days??-1;
+  return items.sort((a,b)=>sortBy==='recent'?age(b)-age(a)||b.logical-a.logical:b.logical-a.logical||age(b)-age(a));
 }
 function visible(group){return visibleItems(group).length>0||filter==='eligible'&&pinnedInView.has(group.key)}
-function selectableItems(group){return group.items.filter(item=>filter==='linked'?item.linked:filter==='recommended'?item.eligible&&recommended.has(item.path):item.eligible)}
+function selectableItems(group){return group.items.filter(item=>!item.catalog_only&&(filter==='linked'?item.linked:filter==='recommended'?item.eligible&&recommended.has(item.path):item.eligible))}
 function groupPaths(group){return selectableItems(group).map(item=>item.path)}
 
 function storageTargets(volumes){
@@ -72,9 +86,29 @@ function render(){
   $('#heroText').textContent=`${totals.eligible_files} 个静置子任务符合安全条件；迁移后先保留回滚，不会立即删除。`;
   $('#free').textContent=data.disk.free_h;$('#diskBar').style.width=data.disk.used_percent+'%';
   $('#protected').textContent=totals.main_files+' 个';$('#linked').textContent=totals.linked_files+' 个';$('#rollback').textContent=totals.rollback_h;
+  $('#catalogStatus').textContent=`本地索引 ${data.catalog?.items??totals.files} 项`;
   renderStorageTargets(data.volumes||[]);renderProjects();updateSelection();
 }
-async function syncVolumes(){try{const response=await fetch('/api/volumes').then(result=>result.json());data.volumes=response.volumes||[];renderStorageTargets(data.volumes)}catch(error){$('#driveStatus').textContent='存储目的地 · 状态未知'}}
+
+async function runSearch(){
+  const query=$('#search').value.trim();
+  $('#clearSearch').hidden=!query;
+  if(!query){searchMatches=null;searchResults=[];renderProjects();return}
+  try{
+    const response=await fetch('/api/search?'+new URLSearchParams({q:query,limit:100})).then(result=>result.json());
+    searchResults=response.results||[];
+    searchMatches=new Set(searchResults.map(item=>item.source_path));
+    expandedGroups.clear();for(const group of groups())if(group.items.some(item=>searchMatches.has(item.path)))expandedGroups.add(group.key);
+    renderProjects();
+  }catch(error){toast('搜索索引暂不可用',true)}
+}
+async function syncVolumes(){
+  try{
+    const response=await fetch('/api/volumes').then(result=>result.json());data.volumes=response.volumes||[];renderStorageTargets(data.volumes);
+    const repair=await post('/api/repair-links',{});
+    if(repair.repaired?.length){toast(`已安全恢复 ${repair.repaired.length} 条外挂连接`);await refresh(false)}
+  }catch(error){$('#driveStatus').textContent='存储目的地 · 状态未知'}
+}
 window.harborVolumeChanged=syncVolumes;
 
 function taskLabel(item){
@@ -85,6 +119,8 @@ function taskLabel(item){
 }
 function taskTitle(item){return item.title||taskLabel(item)}
 function taskState(item){
+  if(item.catalog_only&&!item.target_exists)return['仅索引可见','offline'];
+  if(item.catalog_only)return['外挂原件','linked'];
   if(item.protected_session)return['永久保留','protected'];
   if(item.protected_project)return['项目保留','protected'];
   if(item.linked&&!item.target_exists)return['目的地离线','offline'];
@@ -95,10 +131,11 @@ function taskState(item){
   return['近期任务','recent'];
 }
 function renderTask(item){
-  const selectable=filter==='linked'?item.linked:item.eligible;
+  const selectable=!item.catalog_only&&(filter==='linked'?item.linked:item.eligible);
   const [state,stateClass]=taskState(item);
   const checked=selected.has(item.path);
-  return`<div class="task-row ${checked?'selected':''}" data-task-row="${esc(item.path)}"><span class="branch-line"></span><input type="checkbox" data-task="${esc(item.path)}" ${checked?'checked':''} ${selectable?'':'disabled'}><span class="task-icon">${item.kind==='main'?'◆':'◇'}</span><button class="task-name task-title-button" data-detail-task="${esc(item.id||'')}"><b>${esc(taskTitle(item))}</b><span>${esc(taskLabel(item))} · ${esc(item.name)}</span></button><span class="task-size">${item.logical_h}</span><span class="task-age">${item.age_days} 天前</span><span class="task-state ${stateClass}">${state}</span>${item.id?`<button class="task-inspect" data-detail-task="${esc(item.id)}">查看</button><button class="pin task-pin ${item.protected_session?'on':''}" data-pin-session="${esc(item.id)}" title="${item.protected_session?'取消任务保留':'永久保留此任务'}">${item.protected_session?'★':'☆'}</button>`:'<span></span><span></span>'}</div>`;
+  const age=item.age_days==null?'时间未知':`${item.age_days} 天前`;
+  return`<div class="task-row ${checked?'selected':''}" data-task-row="${esc(item.path)}"><span class="branch-line"></span><input type="checkbox" data-task="${esc(item.path)}" ${checked?'checked':''} ${selectable?'':'disabled'}><span class="task-icon">${item.kind==='main'?'◆':'◇'}</span><button class="task-name task-title-button" data-detail-task="${esc(item.id||'')}"><b>${esc(taskTitle(item))}</b><span>${esc(taskLabel(item))} · ${esc(item.name)}</span></button><span class="task-size">${item.logical_h}</span><span class="task-age">${age}</span><span class="task-state ${stateClass}">${state}</span>${item.id?`<button class="task-inspect" data-detail-task="${esc(item.id)}">查看</button><button class="pin task-pin ${item.protected_session?'on':''}" data-pin-session="${esc(item.id)}" title="${item.protected_session?'取消任务保留':'永久保留此任务'}">${item.protected_session?'★':'☆'}</button>`:'<span></span><span></span>'}</div>`;
 }
 function formatDate(value){if(!value)return'未知';const date=new Date(value);return Number.isNaN(date.getTime())?'未知':new Intl.DateTimeFormat('zh-CN',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}).format(date)}
 async function showTaskDetail(id){
@@ -178,6 +215,8 @@ async function executeMigration(items){
 
 $('#compact').onclick=()=>location.href='harbor://compact';
 $('#refresh').onclick=()=>refresh(true);
+$('#search').oninput=()=>{clearTimeout(searchTimer);searchTimer=setTimeout(runSearch,220)};
+$('#clearSearch').onclick=()=>{$('#search').value='';runSearch();$('#search').focus()};
 $('#sortBy').onchange=()=>{sortBy=$('#sortBy').value;frozenProjectOrder=null;pinnedInView.clear();renderProjects()};
 document.querySelectorAll('[data-filter]').forEach(button=>button.onclick=()=>{document.querySelectorAll('[data-filter]').forEach(item=>item.classList.remove('active'));button.classList.add('active');filter=button.dataset.filter;frozenProjectOrder=null;pinnedInView.clear();if(filter!=='recommended'){selected.clear();recommended.clear();$('#recommendedTab').hidden=true}renderProjects();updateSelection()});
 $('#selectAll').onclick=()=>{const items=selectRecommended();toast(items.length?`已推荐 ${items.length} 个安全候选，可逐项调整`:'暂时没有符合条件的候选')};

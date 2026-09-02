@@ -11,6 +11,9 @@ Treat Codex session JSONL as recovery and audit evidence, not cache.
 
 - For a visual inventory or user-driven migration, run `python3 scripts/harbor.py serve --open`.
 - For a quick read-only report, run `python3 scripts/harbor.py scan`.
+- For metadata-only discovery, run `python3 scripts/harbor.py search "keywords"`.
+- If the local discovery cache is missing, run `python3 scripts/harbor.py rebuild-index` while the archive drive is mounted.
+- To reconcile links after a volume rename, run `python3 scripts/harbor.py repair-links`; accept a repair only after persistent volume UUID, byte length, and SHA-256 all match.
 - For automation or diagnosis, use the CLI subcommands shown by `python3 scripts/harbor.py --help`.
 
 ## Safety contract
@@ -22,5 +25,6 @@ Treat Codex session JSONL as recovery and audit evidence, not cache.
 - Finalization is the only step that reclaims the rollback copy. Require explicit authorization immediately before it.
 - Stop a batch on the first failure. Never silently skip a verification error.
 - Do not move the whole `sessions` root or active main tasks.
+- Do not index prompts, responses, tool output, browser state, or credentials in the local discovery catalog.
 
 Read [tested boundaries](references/tested-boundaries.md) before describing restart, remount, or large-batch support.

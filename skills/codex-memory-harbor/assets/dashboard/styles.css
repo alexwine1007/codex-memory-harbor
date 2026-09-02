@@ -49,6 +49,12 @@ button:disabled{opacity:.32;cursor:not-allowed}
 .panel{border:1px solid var(--line);border-radius:21px;background:var(--panel);overflow:hidden}
 .panel-head{display:flex;align-items:center;justify-content:space-between;padding:20px 22px;border-bottom:1px solid var(--line)}
 .panel-tools{display:flex;align-items:center;gap:12px}
+.search-control{display:flex;align-items:center;width:210px;height:32px;padding:0 8px;border:1px solid var(--line);border-radius:9px;background:#11131c;color:#74798c}
+.search-control>span{font-size:17px;line-height:1}
+.search-control input{min-width:0;flex:1;height:30px;padding:0 7px;border:0;outline:0;background:transparent;color:#e8e9f0;font-size:11px}
+.search-control input::-webkit-search-cancel-button{display:none}
+.search-control button{width:22px;height:22px;padding:0;border:0;background:transparent;color:#858a9b;font-size:16px}
+.search-control button:hover{border:0;color:#fff}
 .sort-control{display:flex;align-items:center;gap:7px;color:var(--muted);font-size:11px}
 .sort-control select{height:32px;border:1px solid var(--line);border-radius:9px;background:#1c1e29;color:#e8e9f0;padding:0 28px 0 10px;font:inherit}
 .scan-button{height:32px;padding:0 10px;border-radius:9px;background:transparent;color:var(--muted);font-size:11px}
@@ -113,6 +119,7 @@ dialog form{display:flex;justify-content:flex-end;gap:8px;margin-top:20px}
 @media(max-width:780px){.summary{grid-template-columns:1fr 1fr}
 .panel-head{align-items:flex-start;gap:14px}
 .panel-tools{align-items:flex-end;flex-direction:column}
+.search-control{width:100%}
 .header-actions{gap:7px}
 .drive-picker{width:210px}
 .project,.task-row{grid-template-columns:24px 22px 24px 1fr 72px 50px 34px}

@@ -4,7 +4,8 @@
 
 Codex Memory Harbor safely docks old Codex **child-task session logs** on a permanently attached external drive while preserving their original paths through verified symlinks.
 
-Version 0.2 introduces a storage-provider boundary: external volumes work today,
+Version 0.3 adds a small rebuildable local catalog and a stable-volume identity layer.
+External volumes work today,
 while cloud storage is deliberately shown as a future provider until verified local
 materialization, offline behavior, integrity checks, and credential handling exist.
 See [PRODUCT.md](PRODUCT.md) for the product and continuity contract.
@@ -40,6 +41,26 @@ python3 skills/codex-memory-harbor/scripts/harbor.py serve --open
 
 The server binds only to `127.0.0.1`, uses a per-process action token, and never reads browser credentials.
 
+### Search the local catalog
+
+Every scan updates `~/.codex/memory-harbor/catalog.sqlite3`. The catalog keeps task,
+project, source-path, external-location, and integrity metadata searchable even when a
+source entry later becomes unavailable. It does not index full conversation bodies.
+
+```bash
+python3 skills/codex-memory-harbor/scripts/harbor.py search "EP03"
+python3 skills/codex-memory-harbor/scripts/harbor.py index-status
+python3 skills/codex-memory-harbor/scripts/harbor.py rebuild-index
+```
+
+The dashboard exposes the same catalog through its search field. `repair-links` can
+reconcile a broken absolute symlink after a removable volume is renamed, but only when
+the persistent volume UUID and the archived content hash both match.
+
+Storage-adaptive transfer optimization is on the roadmap, not claimed in this build.
+It will tune bounded concurrency, chunk size, checksum pipelining, and read caching from
+measured target latency and throughput while keeping the same durable safety gates.
+
 ### Build the macOS app
 
 ```bash
@@ -68,6 +89,8 @@ It is intentionally not advertised as a native WidgetKit extension. Registering 
 - Batch operations stop on the first failure.
 - “Offloaded” does not mean internal space was reclaimed while a local rollback exists.
 - If the external drive is unavailable, links are visibly reported as unavailable.
+- A local FTS catalog preserves discovery metadata while the drive is unavailable; it
+  does not pretend that offline raw content can be opened.
 
 ### Retention model
 
