@@ -27,6 +27,18 @@ class HarborTests(unittest.TestCase):
         self.assertIn("必须编写或更新相关测试", policy)
         self.assertIn("确保所有测试和验证全部通过", policy)
 
+    def test_product_north_star_preserves_safety_and_physical_limit_speed(self):
+        contract = (REPO_ROOT / "PRODUCT.md").read_text(encoding="utf-8")
+        north_star = (REPO_ROOT / "PRODUCT_NORTH_STAR.zh-CN.md").read_text(encoding="utf-8")
+        self.assertIn("PRODUCT_NORTH_STAR.zh-CN.md", contract)
+        self.assertIn("可验证的长期连续性", north_star)
+        self.assertIn("能停、能找、能读、能续、不扰、可迁、够快", north_star)
+        self.assertIn("纯传输效率 η_copy", north_star)
+        self.assertIn("安全流水线效率 η_verified", north_star)
+        self.assertIn("持续优化目标不低于 90%", north_star)
+        self.assertIn("未验证删除：0 次", north_star)
+        self.assertIn("不以关闭 fsync、跳过回读", north_star)
+
     def test_public_project_name_is_memory_harbor(self):
         metadata = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
         readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")

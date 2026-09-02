@@ -1,5 +1,10 @@
 # Memory Harbor product contract
 
+The Chinese product north star, first-principles model, and measurable acceptance
+metrics live in [PRODUCT_NORTH_STAR.zh-CN.md](PRODUCT_NORTH_STAR.zh-CN.md). This contract
+defines the current implementation boundary; the north-star document defines how the
+product is judged as it evolves.
+
 Memory Harbor is a lightweight macOS companion for Codex. It finds large, inactive,
 completed child-task histories and safely docks them outside the internal disk while
 preserving the original path that Codex reads.
