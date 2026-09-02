@@ -5,9 +5,19 @@ metrics live in [PRODUCT_NORTH_STAR.zh-CN.md](PRODUCT_NORTH_STAR.zh-CN.md). This
 defines the current implementation boundary; the north-star document defines how the
 product is judged as it evolves.
 
-Memory Harbor is a lightweight macOS companion for Codex. It finds large, inactive,
-completed child-task histories and safely docks them outside the internal disk while
-preserving the original path that Codex reads.
+Memory Harbor is a runtime-neutral continuity product for personal Agent work history.
+Its current implementation is a lightweight macOS companion with one verified Runtime
+Adapter: Codex. That adapter finds large, inactive, completed child-task histories and
+safely docks them outside the internal disk while preserving the original path that Codex
+reads. Runtime neutrality is the product direction, not a claim that other runtimes are
+already supported.
+
+The core contract must not assume Codex JSONL, task ids, directory layout, or symlink
+semantics. Runtime-specific discovery, liveness, identity, native open, and resume behavior
+belong behind a Runtime Adapter. Storage-specific durability, verification,
+materialization, recovery, and credential handling belong behind a Storage Adapter. See
+[ADR 0001](docs/adr/0001-runtime-neutral-core.md) and the canonical vocabulary in
+[CONTEXT.md](CONTEXT.md).
 
 Version 0.3 maintains a small local discovery catalog. This makes task identity,
 project membership, integrity metadata, and external location searchable without

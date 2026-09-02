@@ -30,6 +30,8 @@ class HarborTests(unittest.TestCase):
     def test_product_north_star_preserves_safety_and_physical_limit_speed(self):
         contract = (REPO_ROOT / "PRODUCT.md").read_text(encoding="utf-8")
         north_star = (REPO_ROOT / "PRODUCT_NORTH_STAR.zh-CN.md").read_text(encoding="utf-8")
+        context = (REPO_ROOT / "CONTEXT.md").read_text(encoding="utf-8")
+        runtime_adr = (REPO_ROOT / "docs/adr/0001-runtime-neutral-core.md").read_text(encoding="utf-8")
         self.assertIn("PRODUCT_NORTH_STAR.zh-CN.md", contract)
         self.assertIn("可验证的长期连续性", north_star)
         self.assertIn("能停、能找、能读、能续、不扰、可迁、够快", north_star)
@@ -38,6 +40,14 @@ class HarborTests(unittest.TestCase):
         self.assertIn("持续优化目标不低于 90%", north_star)
         self.assertIn("未验证删除：0 次", north_star)
         self.assertIn("不以关闭 fsync、跳过回读", north_star)
+        self.assertIn("当前实现边界", north_star)
+        self.assertIn("Codex、Claude Code 和 OpenClaw", north_star)
+        self.assertIn("DeepSeek 通常是模型或模型服务提供方", north_star)
+        self.assertIn("第二个真实 Runtime Adapter", north_star)
+        self.assertIn("runtime-neutral continuity product", contract)
+        self.assertIn("**History Object**", context)
+        self.assertIn("**Native Continuity**", context)
+        self.assertIn("one adapter makes a seam hypothetical; two adapters make it real", runtime_adr)
 
     def test_public_project_name_is_memory_harbor(self):
         metadata = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
