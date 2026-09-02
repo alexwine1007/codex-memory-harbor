@@ -229,7 +229,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         statusProcess?.terminate()
         statusProcess = nil
         let helper = Bundle.main.bundleURL.appendingPathComponent(
-            "Contents/Helpers/Memory Harbor Dashboard.app/Contents/MacOS/CodexMemoryHarborDashboard"
+            "Contents/Helpers/Memory Harbor Dashboard.app/Contents/MacOS/MemoryHarborDashboard"
         ).path
         let process = Process()
         process.executableURL = URL(fileURLWithPath: helper)

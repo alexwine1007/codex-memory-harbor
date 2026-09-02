@@ -29,9 +29,32 @@ class HarborTests(unittest.TestCase):
         metadata = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
         readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
         self.assertIn('name = "memory-harbor"', metadata)
+        self.assertIn('version = "0.4.3b1"', metadata)
+        self.assertEqual(harbor.VERSION, "0.4.3-beta.1")
         self.assertEqual(readme.splitlines()[0], "# Memory Harbor")
         self.assertIn("canonical checkout directory is `memory-harbor`", readme)
         self.assertIn("`codex-memory-harbor` compatibility symlink", readme)
+
+    def test_macos_build_uses_stable_identity_and_privacy_description(self):
+        build = (REPO_ROOT / "scripts/build_macos_app.sh").read_text(encoding="utf-8")
+        signer = (REPO_ROOT / "scripts/ensure_codesign_identity.sh").read_text(encoding="utf-8")
+        self.assertIn("ensure_codesign_identity.sh", build)
+        self.assertNotIn("--sign -", build)
+        self.assertIn("refuses ad-hoc signing", signer)
+        self.assertIn("Memory Harbor/Signing", signer)
+        self.assertIn("keychain-password", signer)
+        self.assertIn("chmod 600", signer)
+        self.assertEqual(build.count("NSRemovableVolumesUsageDescription"), 2)
+        self.assertIn("com.alexsolar.memory-harbor", build)
+        self.assertNotIn("com.alexsolar.codex-memory-harbor", build)
+
+    def test_macos_installer_retires_legacy_identity_and_uses_absolute_login_path(self):
+        install = (REPO_ROOT / "scripts/install_macos.sh").read_text(encoding="utf-8")
+        self.assertIn('/Applications/Codex Memory Harbor.app', install)
+        self.assertIn('com.alexsolar.codex-memory-harbor', install)
+        self.assertIn('com.alexsolar.memory-harbor', install)
+        self.assertIn('Add :ProgramArguments:1 string $APP_DEST', install)
+        self.assertNotIn('Add :ProgramArguments:1 string -a', install)
 
     def fixture(self, root: Path, child=True, complete=True):
         path = root / "sessions/2026/01/01/rollout-test.jsonl"; path.parent.mkdir(parents=True)

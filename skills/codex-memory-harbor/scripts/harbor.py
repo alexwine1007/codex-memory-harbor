@@ -26,7 +26,7 @@ from collections import deque
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "0.4.2-beta.1"
+VERSION = "0.4.3-beta.1"
 DEFAULT_ARCHIVE = "Memory Harbor"
 LEGACY_ARCHIVES = ("Codex Memory Harbor",)
 CATALOG_SCHEMA_VERSION = 3
@@ -1456,7 +1456,7 @@ def restore_one(path_value: str, codex_home: Path) -> dict:
 
 
 class HarborHandler(BaseHTTPRequestHandler):
-    server_version = "CodexMemoryHarbor/" + VERSION
+    server_version = "MemoryHarbor/" + VERSION
     def log_message(self, fmt, *args):
         sys.stderr.write("[harbor] " + fmt % args + "\n")
     @property

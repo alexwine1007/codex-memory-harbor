@@ -127,6 +127,14 @@ open "dist/Memory Harbor.app"
 
 The app expects the Skill at `~/.codex/skills/codex-memory-harbor`. Set `CODEX_HARBOR_SCRIPT` to override that path.
 
+The first local build creates a reusable `Memory Harbor Local Code Signing` identity in
+a dedicated keychain under `~/Library/Application Support/Memory Harbor/Signing`. It does
+not request the user's login-keychain password. macOS ties privacy grants to that identity,
+so upgrading the app does not turn every build into a new removable-volume requester. Set
+`MEMORY_HARBOR_CODESIGN_IDENTITY` to an existing Apple Development or Developer ID
+identity when preparing a distributable build. Ad-hoc signing is rejected because its
+identity changes with the executable.
+
 The canonical checkout directory is `memory-harbor`. An existing Codex project may keep
 using a `codex-memory-harbor` compatibility symlink that resolves to the canonical checkout;
 this preserves saved project and task paths without duplicating the repository.
@@ -138,6 +146,10 @@ this preserves saved project and task paths without duplicating the repository.
 ```
 
 Pass `--login-item` to reopen the compact card after login. The companion is a desktop-layer window: it can be moved, stays out of normal window switching while compact, and expands into the dashboard on demand.
+
+Installation also retires the pre-rename `Codex Memory Harbor.app` and its launch agent,
+while preserving them in Trash/migration backups. On the first launch of the new stable
+identity, macOS asks once for removable-volume access and then remembers the choice.
 
 It is intentionally not advertised as a native WidgetKit extension. Registering a third-party WidgetKit extension requires full Xcode and a valid Apple code-signing identity; the current beta uses only the tools already present on a standard developer Mac.
 
