@@ -15,7 +15,7 @@ final class DashboardDelegate: NSObject, NSApplicationDelegate, WKNavigationDele
         let height = min(790, max(620, visible.height - 28))
         let frame = NSRect(x: visible.midX - width / 2, y: visible.midY - height / 2, width: width, height: height)
         window = NSWindow(contentRect: frame, styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
-        window.title = "Codex Memory Harbor · 记忆港"
+        window.title = "Memory Harbor"
         window.minSize = NSSize(width: min(760, width), height: min(620, height))
         window.titlebarAppearsTransparent = true
         window.isOpaque = false
@@ -98,7 +98,7 @@ final class DashboardDelegate: NSObject, NSApplicationDelegate, WKNavigationDele
     }
 
     private func showError(_ message: String) {
-        let alert = NSAlert(); alert.messageText = "Codex Memory Harbor"; alert.informativeText = message; alert.alertStyle = .warning; alert.runModal()
+        let alert = NSAlert(); alert.messageText = "Memory Harbor"; alert.informativeText = message; alert.alertStyle = .warning; alert.runModal()
     }
 }
 

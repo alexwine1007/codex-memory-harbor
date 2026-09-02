@@ -13,7 +13,7 @@ final class CompactCardView: NSView {
         logo.image = NSApplication.shared.applicationIconImage
         logo.imageScaling = .scaleProportionallyUpOrDown
         addSubview(logo)
-        let title = CompactCardView.label("记忆港", size: 16, weight: .semibold)
+        let title = CompactCardView.label("Memory Harbor", size: 16, weight: .semibold)
         title.frame = NSRect(x: 72, y: 203, width: 180, height: 23)
         addSubview(title)
         statusLabel.frame = NSRect(x: 72, y: 184, width: 210, height: 20)
@@ -113,7 +113,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         buildMenu()
         let frame = NSRect(x: 0, y: 0, width: 360, height: 250)
         window = NSWindow(contentRect: frame, styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
-        window.title = "Codex Memory Harbor · 记忆港"
+        window.title = "Memory Harbor"
         window.isMovableByWindowBackground = true
         window.minSize = frame.size
         window.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
@@ -229,7 +229,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         statusProcess?.terminate()
         statusProcess = nil
         let helper = Bundle.main.bundleURL.appendingPathComponent(
-            "Contents/Helpers/Codex Memory Harbor Dashboard.app/Contents/MacOS/CodexMemoryHarborDashboard"
+            "Contents/Helpers/Memory Harbor Dashboard.app/Contents/MacOS/CodexMemoryHarborDashboard"
         ).path
         let process = Process()
         process.executableURL = URL(fileURLWithPath: helper)
@@ -254,13 +254,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     private func buildMenu() {
         let menu = NSMenu(); let appItem = NSMenuItem(); menu.addItem(appItem)
-        let submenu = NSMenu(); submenu.addItem(withTitle: "关于 Codex Memory Harbor", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        let submenu = NSMenu(); submenu.addItem(withTitle: "关于 Memory Harbor", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
         submenu.addItem(NSMenuItem.separator()); submenu.addItem(withTitle: "退出", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appItem.submenu = submenu; NSApp.mainMenu = menu
     }
 
     private func showError(_ message: String) {
-        let alert = NSAlert(); alert.messageText = "Codex Memory Harbor"; alert.informativeText = message; alert.alertStyle = .warning; alert.runModal()
+        let alert = NSAlert(); alert.messageText = "Memory Harbor"; alert.informativeText = message; alert.alertStyle = .warning; alert.runModal()
     }
 }
 

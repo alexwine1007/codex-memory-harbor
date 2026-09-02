@@ -105,6 +105,7 @@ h2{font-size:17px;margin:0}
 dialog{border:1px solid #ffffff18;border-radius:18px;background:#1a1c27;color:#fff;width:min(520px,90vw);padding:24px;box-shadow:0 30px 90px #000b}
 dialog::backdrop{background:#05060aaa;backdrop-filter:blur(4px)}
 dialog form{display:flex;justify-content:flex-end;gap:8px;margin-top:20px}
+.backup-option{display:flex;gap:11px;align-items:flex-start;margin-top:18px;padding:13px 14px;border:1px solid #8171ff30;border-radius:12px;background:#8171ff0b;cursor:pointer}.backup-option input{margin-top:3px;accent-color:var(--v)}.backup-option span,.backup-option b,.backup-option small{display:block}.backup-option b{font-size:12px}.backup-option small{margin-top:4px;color:var(--muted);font-size:10px;line-height:1.45}
 .progress-dialog{text-align:center;width:min(430px,90vw)}
 .progress-mark{display:grid;place-items:center;width:48px;height:48px;margin:0 auto 16px;overflow:hidden;border:1px solid #8c7bff66;border-radius:15px;background:#8171ff18}
 .progress-dialog h3{margin:0 0 8px}.progress-dialog p{margin:0;color:var(--muted)}

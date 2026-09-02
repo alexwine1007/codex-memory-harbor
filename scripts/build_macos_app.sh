@@ -1,21 +1,21 @@
 #!/bin/zsh
 set -euo pipefail
 ROOT="${0:A:h:h}"
-APP="$ROOT/dist/Codex Memory Harbor.app"
+APP="$ROOT/dist/Memory Harbor.app"
 CONTENTS="$APP/Contents"
 mkdir -p "$CONTENTS/MacOS" "$CONTENTS/Resources"
 xcrun swiftc "$ROOT/macos/CodexMemoryHarbor.swift" -o "$CONTENTS/MacOS/CodexMemoryHarbor" -framework Cocoa
 rm -f "$CONTENTS/MacOS/CodexMemoryHarborDashboard"
-HELPER="$CONTENTS/Helpers/Codex Memory Harbor Dashboard.app"
+HELPER="$CONTENTS/Helpers/Memory Harbor Dashboard.app"
 rm -rf "$HELPER"
 mkdir -p "$HELPER/Contents/MacOS"
 xcrun swiftc "$ROOT/macos/CodexMemoryHarborDashboard.swift" -o "$HELPER/Contents/MacOS/CodexMemoryHarborDashboard" -framework Cocoa -framework WebKit
 /usr/libexec/PlistBuddy -c 'Clear dict' "$HELPER/Contents/Info.plist" 2>/dev/null || true
-/usr/libexec/PlistBuddy -c 'Add :CFBundleName string Codex Memory Harbor Dashboard' "$HELPER/Contents/Info.plist"
-/usr/libexec/PlistBuddy -c 'Add :CFBundleDisplayName string Codex Memory Harbor Dashboard' "$HELPER/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c 'Add :CFBundleName string Memory Harbor Dashboard' "$HELPER/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c 'Add :CFBundleDisplayName string Memory Harbor Dashboard' "$HELPER/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c 'Add :CFBundleIdentifier string com.alexsolar.codex-memory-harbor.dashboard' "$HELPER/Contents/Info.plist"
-/usr/libexec/PlistBuddy -c 'Add :CFBundleVersion string 9' "$HELPER/Contents/Info.plist"
-/usr/libexec/PlistBuddy -c 'Add :CFBundleShortVersionString string 0.4.0-beta.1' "$HELPER/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c 'Add :CFBundleVersion string 10' "$HELPER/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c 'Add :CFBundleShortVersionString string 0.4.1-beta.1' "$HELPER/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c 'Add :CFBundleExecutable string CodexMemoryHarborDashboard' "$HELPER/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c 'Add :LSMinimumSystemVersion string 13.0' "$HELPER/Contents/Info.plist"
 codesign --force --sign - "$HELPER"
@@ -32,11 +32,11 @@ done
 iconutil -c icns "$ICONSET" -o "$CONTENTS/Resources/MemoryHarbor.icns"
 rm -rf "$ICONSET"
 /usr/libexec/PlistBuddy -c 'Clear dict' "$CONTENTS/Info.plist" 2>/dev/null || true
-/usr/libexec/PlistBuddy -c 'Add :CFBundleName string Codex Memory Harbor' "$CONTENTS/Info.plist"
-/usr/libexec/PlistBuddy -c 'Add :CFBundleDisplayName string Codex Memory Harbor' "$CONTENTS/Info.plist"
+/usr/libexec/PlistBuddy -c 'Add :CFBundleName string Memory Harbor' "$CONTENTS/Info.plist"
+/usr/libexec/PlistBuddy -c 'Add :CFBundleDisplayName string Memory Harbor' "$CONTENTS/Info.plist"
 /usr/libexec/PlistBuddy -c 'Add :CFBundleIdentifier string com.alexsolar.codex-memory-harbor' "$CONTENTS/Info.plist"
-/usr/libexec/PlistBuddy -c 'Add :CFBundleVersion string 9' "$CONTENTS/Info.plist"
-/usr/libexec/PlistBuddy -c 'Add :CFBundleShortVersionString string 0.4.0-beta.1' "$CONTENTS/Info.plist"
+/usr/libexec/PlistBuddy -c 'Add :CFBundleVersion string 10' "$CONTENTS/Info.plist"
+/usr/libexec/PlistBuddy -c 'Add :CFBundleShortVersionString string 0.4.1-beta.1' "$CONTENTS/Info.plist"
 /usr/libexec/PlistBuddy -c 'Add :CFBundleExecutable string CodexMemoryHarbor' "$CONTENTS/Info.plist"
 /usr/libexec/PlistBuddy -c 'Add :CFBundleIconFile string MemoryHarbor' "$CONTENTS/Info.plist"
 /usr/libexec/PlistBuddy -c 'Add :LSMinimumSystemVersion string 13.0' "$CONTENTS/Info.plist"

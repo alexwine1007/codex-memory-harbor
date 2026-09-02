@@ -85,7 +85,7 @@ function bindStoragePicker(){
 function render(){
   const totals=data.totals;
   $('#eligible').textContent=totals.eligible_h;
-  $('#heroText').textContent=`${totals.eligible_files} 个静置子任务符合安全条件；迁移后先保留回滚，不会立即删除。`;
+  $('#heroText').textContent=`${totals.eligible_files} 个静置子任务符合安全条件；迁移完成后自动释放本地实体。`;
   $('#free').textContent=data.disk.free_h;$('#diskBar').style.width=data.disk.used_percent+'%';
   $('#protected').textContent=totals.main_files+' 个';$('#linked').textContent=totals.linked_files+' 个';$('#rollback').textContent=totals.rollback_h;
   const recalled=data.catalog?.recall_sessions||0;
@@ -180,10 +180,10 @@ function updateSelection(){
   const items=data.sessions.filter(item=>selected.has(item.path)),projects=new Set(items.map(item=>item.project_id||'__standalone__')),linkedMode=filter==='linked';
   $('#selected').textContent=items.length?`已选 ${items.length} 个任务 · ${projects.size} 个分组`:'未选择任务';
   $('#selectedSize').textContent=fmt(items.reduce((total,item)=>total+(item.backup_exists?item.backup_bytes:item.logical),0));
-  $('#offload').disabled=!items.length;$('#offload').textContent=items.length?(linkedMode?'管理所选':'整理所选'):(linkedMode?'选择已停泊任务':'选择任务后整理');
+  $('#offload').disabled=!items.length;$('#offload').textContent=items.length?(linkedMode?'管理所选':'迁移所选'):(linkedMode?'选择已停泊任务':'选择任务后迁移');
 }
 async function post(path,body){const response=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json','X-Harbor-Token':token},body:JSON.stringify(body)});const json=await response.json();if(!response.ok||!json.ok)throw Error(json.error||'操作失败');return json}
-function base(paths=[...selected]){return{paths,volume:$('#volume').value,storage_target:{provider:'external_volume',location:$('#volume').value},min_age:30,priority:(config.protected_projects||[]).join('\n'),archive_name:'Codex Memory Harbor'}}
+function base(paths=[...selected]){return{paths,volume:$('#volume').value,storage_target:{provider:'external_volume',location:$('#volume').value},min_age:30,priority:(config.protected_projects||[]).join('\n'),archive_name:'Memory Harbor'}}
 async function ask(title,html){$('#dialogTitle').textContent=title;$('#dialogBody').innerHTML=html;const dialog=$('#dialog');dialog.showModal();return new Promise(resolve=>dialog.addEventListener('close',()=>resolve(dialog.returnValue==='ok'),{once:true}))}
 
 function recommendedItems(){
@@ -199,21 +199,30 @@ function selectRecommended(){
   filter='recommended';$('#recommendedTab').hidden=false;document.querySelectorAll('[data-filter]').forEach(button=>button.classList.toggle('active',button.dataset.filter==='recommended'));
   renderProjects();updateSelection();return data.sessions.filter(item=>selected.has(item.path));
 }
-async function prepareMigration(items,title='整理所选任务'){
+async function prepareMigration(items,title='迁移所选任务'){
   if(!$('#volume').value)throw Error('请先连接并选择一个可写外置盘');
   if(!items.length)throw Error('请先选择要整理的任务');
   const plan=await post('/api/plan',base(items.map(item=>item.path))),total=plan.results.reduce((sum,item)=>sum+item.bytes,0);
-  if(!await ask(title,`<p>将安全整理 <b>${items.length}</b> 个已完成子任务，共 <b>${fmt(total)}</b>。</p><p>系统会逐条复制并校验；本地回滚不会自动删除。</p>`))return;
-  await executeMigration(items);
+  const confirmed=await ask(title,`<p>将迁移 <b>${items.length}</b> 个已完成子任务，共 <b>${fmt(total)}</b>。</p><p>每项都会先复制、校验并建立可读取连接；通过后自动删除本地实体并释放空间。</p><label class="backup-option"><input id="keepLocalBackup" type="checkbox"><span><b>同时保留本地备份</b><small>用于额外观察；不会释放这部分内盘空间</small></span></label>`);
+  const keepLocalBackup=Boolean($('#keepLocalBackup')?.checked);
+  if(!confirmed)return;
+  await executeMigration(items,{keepLocalBackup});
 }
 function setProgress(completed,total,bytes,totalBytes,stage){$('#progressCount').textContent=`${completed} / ${total}`;$('#progressBytes').textContent=`${fmt(bytes)} / ${fmt(totalBytes)}`;$('#progressFill').style.width=(total?completed/total*100:0)+'%';$('#progressStage').textContent=stage}
-async function executeMigration(items){
-  const dialog=$('#progressDialog');$('#progressClose').disabled=true;$('#progressTitle').textContent='正在安全停泊';setProgress(0,items.length,0,items.reduce((sum,item)=>sum+item.logical,0),'逐条复制、校验并建立可读取连接…');dialog.showModal();
-  let completed=0,bytes=0;
+async function executeMigration(items,{keepLocalBackup=false}={}){
+  const dialog=$('#progressDialog'),totalBytes=items.reduce((sum,item)=>sum+item.logical,0);$('#progressClose').disabled=true;$('#progressTitle').textContent=keepLocalBackup?'正在备份并停泊':'正在迁移';setProgress(0,items.length,0,totalBytes,'逐条复制、校验并建立可读取连接…');dialog.showModal();
+  let completed=0,bytes=0,released=0;
   try{
-    for(const item of items){setProgress(completed,items.length,bytes,items.reduce((sum,current)=>sum+current.logical,0),`正在处理 ${item.name}`);await post('/api/offload',base([item.path]));completed++;bytes+=item.logical;setProgress(completed,items.length,bytes,items.reduce((sum,current)=>sum+current.logical,0),`已完成 ${completed} 项`)}
-    $('#progressTitle').textContent='本轮整理完成';$('#progressStage').textContent='外置盘保持在线时，Codex 可沿原路径读取这些记录。';selected.clear();recommended.clear();await refresh();
-  }catch(error){$('#progressTitle').textContent='整理已安全停止';$('#progressStage').textContent=error.message;toast(error.message,true)}
+    for(const item of items){
+      setProgress(completed,items.length,bytes,totalBytes,`正在处理 ${item.name}`);
+      const response=await post(keepLocalBackup?'/api/offload':'/api/migrate',base([item.path]));
+      released+=Number(response.results?.[0]?.bytes_released||0);completed++;bytes+=item.logical;
+      setProgress(completed,items.length,bytes,totalBytes,keepLocalBackup?`已备份 ${completed} 项`:`已迁移并释放 ${completed} 项`);
+    }
+    $('#progressTitle').textContent=keepLocalBackup?'本轮备份完成':'本轮迁移完成';
+    $('#progressStage').textContent=keepLocalBackup?'已保留本地备份；外置盘副本和原路径连接均已校验。':`已释放 ${fmt(released)} 内盘空间；外挂盘在线时 Codex 可沿原路径读取。`;
+    selected.clear();recommended.clear();await refresh();
+  }catch(error){$('#progressTitle').textContent='操作已安全停止';$('#progressStage').textContent=`${error.message}；未通过校验的任务不会删除本地文件。`;toast(error.message,true)}
   $('#progressClose').disabled=false;
 }
 

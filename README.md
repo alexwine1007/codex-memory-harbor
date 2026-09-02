@@ -1,8 +1,8 @@
-# Codex Memory Harbor · 记忆港
+# Memory Harbor
 
 ![Memory Harbor logo](skills/codex-memory-harbor/assets/dashboard/memory-harbor-logo-v4.png)
 
-Codex Memory Harbor safely docks old Codex **child-task session logs** on a permanently attached external drive while preserving their original paths through verified symlinks.
+Memory Harbor safely docks old Codex **child-task session logs** on a permanently attached external drive while preserving their original paths through verified symlinks.
 
 Version 0.4 adds a traceable local recall layer on top of the rebuildable catalog and
 stable-volume identity introduced in 0.3.
@@ -17,7 +17,7 @@ It ships as three pieces that share one safety model:
 - a local-only visual dashboard for inventory, dry runs, offload, audit, restore, and finalization;
 - a lightweight macOS desktop app that keeps the dashboard one click away.
 
-> Beta: this project relies on a filesystem behavior that is not an official Codex storage contract. Keep rollback copies until you have tested a full Codex restart and a drive remount on your machine.
+> Beta: this project relies on a filesystem behavior that is not an official Codex storage contract. Use “同时保留本地备份” until you have tested a full Codex restart and drive remount on your machine.
 
 ## Why
 
@@ -29,9 +29,11 @@ Memory Harbor uses a transactional sequence:
 2. require age, last-turn-complete, and no-open-handle checks;
 3. copy to the external volume;
 4. verify byte size and SHA-256;
-5. retain the local file as a rollback copy;
-6. atomically place an absolute symlink at the original path;
-7. delete the rollback copy only after a separate, explicit finalization.
+5. retain the local file as a rollback copy while the link is being created;
+6. atomically place an absolute symlink at the original path and independently re-audit it;
+7. for a confirmed migration, automatically delete the verified local rollback and reclaim space.
+
+The dashboard can optionally keep that rollback as a **local backup**. This is a backup-retention choice, not a completed space-reclaiming migration, and the UI labels it accordingly.
 
 ## Quick start
 
@@ -116,7 +118,7 @@ metrics belong to the running macOS app rather than this command.
 
 ```bash
 ./scripts/build_macos_app.sh
-open "dist/Codex Memory Harbor.app"
+open "dist/Memory Harbor.app"
 ```
 
 The app expects the Skill at `~/.codex/skills/codex-memory-harbor`. Set `CODEX_HARBOR_SCRIPT` to override that path.
@@ -138,7 +140,7 @@ It is intentionally not advertised as a native WidgetKit extension. Registering 
 - Logs newer than the configured minimum age (30 days by default) are never eligible.
 - Users can star whole projects or individual important sessions for permanent local retention; those pins override age.
 - Batch operations stop on the first failure.
-- “Offloaded” does not mean internal space was reclaimed while a local rollback exists.
+- A migration is complete only after the verified local rollback has been removed. If the user elects to keep a local backup, the dashboard reports that space separately.
 - If the external drive is unavailable, links are visibly reported as unavailable.
 - A local FTS catalog preserves discovery metadata while the drive is unavailable; it
   does not pretend that offline raw content can be opened.

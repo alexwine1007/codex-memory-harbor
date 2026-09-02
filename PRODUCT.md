@@ -23,7 +23,7 @@ relevant evidence candidates without requiring the user to remember an exact phr
 - Recommend only completed child tasks that have been inactive for at least 30 days.
 - Never automatically move main, current, open, incomplete, starred-project, or pinned-task history.
 - Copy, size-check, SHA-256-check, then replace the original with an absolute link.
-- Keep a local rollback copy until the user separately verifies and explicitly releases it.
+- A confirmed migration automatically removes its temporary local rollback only after an independent link-and-target re-audit; an explicit “同时保留本地备份” choice keeps it instead.
 - Restore a docked history to an ordinary local file at any time while its destination is available.
 
 ## Continuous development
@@ -36,9 +36,11 @@ mounted again. Active development history always stays local.
 
 ## One-click optimization
 
-The button ranks eligible history using both size and inactivity. The beta safety batch is
-capped at 25 files or 5 GB, stops on the first error, and never releases rollback copies.
-The user may adjust the recommendation before migration or repeat a verified batch.
+The button ranks eligible history using both size and inactivity. The beta batch is capped
+at 25 files or 5 GB and stops on the first error. After the user confirms a migration, each
+item is copied, verified, linked, independently re-audited, and then its local entity is
+released before the next item begins. The user may instead choose to keep a local backup;
+that mode does not reclaim the corresponding internal space.
 
 ## Information architecture
 
@@ -133,7 +135,8 @@ not as a simulated feature.
 
 Future cloud providers (S3-compatible storage, OSS, or another service) must implement the
 same stages: availability, capacity, upload, integrity verification, materialized local
-read path or managed cache, restore, and explicit local rollback release. Credentials must
+read path or managed cache, restore, and verified local-entity release under the user's
+chosen migration or backup-retention mode. Credentials must
 live in macOS Keychain or the provider's supported authorization flow, never in manifests,
 settings, logs, or repository files.
 
@@ -158,7 +161,8 @@ class and estimated completion time without making unsupported speed claims.
 
 ## Lifecycle
 
-`Local -> Docked with local rollback -> Docked -> Restored local`
+`Local -> Verified link with temporary rollback -> Migrated -> Restored local`
 
-The destructive transition from `Docked with local rollback` to `Docked` always requires a
-fresh, explicit user confirmation after integrity and remount verification.
+The default migration confirmation authorizes the selected batch's per-item local release,
+but only after every integrity gate passes. Choosing “同时保留本地备份” ends at `Migrated
+with local backup`; deleting that retained backup later requires a fresh explicit confirmation.

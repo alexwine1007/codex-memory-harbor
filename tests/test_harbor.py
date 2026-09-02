@@ -5,8 +5,10 @@ from pathlib import Path
 import sqlite3
 import plistlib
 import tempfile
+import threading
 import time
 import unittest
+import urllib.request
 from unittest import mock
 
 SCRIPT = Path(__file__).parents[1] / "skills/codex-memory-harbor/scripts/harbor.py"
@@ -118,8 +120,9 @@ class HarborTests(unittest.TestCase):
             self.assertEqual(harbor.recall_search(root,"不存在"),[])
             self.assertFalse(harbor.catalog_path(root).exists())
 
-    def test_external_manifest_rebuilds_searchable_catalog(self):
+    def test_legacy_named_external_manifest_rebuilds_searchable_catalog(self):
         with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as v:
+            self.assertEqual(harbor.DEFAULT_ARCHIVE, "Memory Harbor")
             root=Path(d); volume=Path(v); manifest=volume/"Codex Memory Harbor/manifests/offload_manifest.jsonl"
             manifest.parent.mkdir(parents=True)
             manifest.write_text(json.dumps({
@@ -301,6 +304,54 @@ class HarborTests(unittest.TestCase):
             self.assertTrue(harbor.audit_one(str(p),root)["verified"])
             harbor.finalize_one(str(p),root); self.assertFalse(Path(moved["backup"]).exists())
             harbor.restore_one(str(p),root); self.assertFalse(p.is_symlink()); self.assertEqual(original,p.read_bytes())
+
+    def test_migrate_reaudits_then_removes_local_backup(self):
+        with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as v:
+            root=Path(d); p=self.fixture(root); volume=Path(v); original=p.read_bytes()
+            plan={"source":str(p),"destination":str(volume/"Archive/sessions/rollout-test.jsonl"),"backup":str(p)+".offload-local-backup","bytes":p.stat().st_size,"bytes_h":harbor.human_bytes(p.stat().st_size),"sha256":harbor.sha256(p),"id":"child-1","cwd":"/tmp/example","open_handles":0}
+            result=harbor.migrate_one(plan,volume,"Archive",root)
+            self.assertEqual(result["event"],"migrated_external_primary")
+            self.assertEqual(result["bytes_released"],len(original))
+            self.assertTrue(p.is_symlink())
+            self.assertEqual(p.read_bytes(),original)
+            self.assertFalse(Path(plan["backup"]).exists())
+            audit=harbor.audit_one(str(p),root)
+            self.assertTrue(audit["verified"])
+            self.assertFalse(audit["backup_exists"])
+
+    def test_migrate_keeps_local_backup_when_reaudit_fails(self):
+        with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as v:
+            root=Path(d); p=self.fixture(root); volume=Path(v)
+            plan={"source":str(p),"destination":str(volume/"Archive/sessions/rollout-test.jsonl"),"backup":str(p)+".offload-local-backup","bytes":p.stat().st_size,"bytes_h":harbor.human_bytes(p.stat().st_size),"sha256":harbor.sha256(p),"id":"child-1","cwd":"/tmp/example","open_handles":0}
+            with mock.patch.object(harbor,"finalize_one",side_effect=harbor.HarborError("reaudit failed")):
+                with self.assertRaisesRegex(harbor.HarborError,"reaudit failed"):
+                    harbor.migrate_one(plan,volume,"Archive",root)
+            self.assertTrue(p.is_symlink())
+            self.assertTrue(Path(plan["backup"]).is_file())
+            self.assertTrue(harbor.audit_one(str(p),root)["verified"])
+
+    def test_migrate_api_completes_move_without_local_backup(self):
+        with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as v:
+            root=Path(d); p=self.fixture(root); volume=Path(v); original=p.read_bytes()
+            server=harbor.ThreadingHTTPServer(("127.0.0.1",0),harbor.HarborHandler)
+            server.app={"assets":Path(d),"token":"test-token","codex_home":root,"priority":"","protected_sessions":[],"cache":None,"cache_lock":threading.Lock()}
+            thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+            request=urllib.request.Request(
+                f"http://127.0.0.1:{server.server_port}/api/migrate",
+                data=json.dumps({"paths":[str(p)],"volume":str(volume),"archive_name":"Archive","min_age":14}).encode(),
+                headers={"Content-Type":"application/json","X-Harbor-Token":"test-token"},
+                method="POST",
+            )
+            try:
+                with mock.patch.object(harbor,"mounted_volume",return_value=volume):
+                    response=json.loads(urllib.request.urlopen(request,timeout=5).read())
+            finally:
+                server.shutdown();server.server_close();thread.join(timeout=5)
+            self.assertTrue(response["ok"])
+            self.assertEqual(response["results"][0]["event"],"migrated_external_primary")
+            self.assertTrue(p.is_symlink())
+            self.assertEqual(p.read_bytes(),original)
+            self.assertFalse(Path(str(p)+".offload-local-backup").exists())
 
 
 if __name__ == "__main__": unittest.main(verbosity=2)

@@ -1,5 +1,5 @@
 interface:
-  display_name: "Codex Memory Harbor"
+  display_name: "Memory Harbor"
   short_description: "Dock old Codex child-task logs safely"
   icon_small: "./assets/icon-small.svg"
   icon_large: "./assets/icon-large.svg"

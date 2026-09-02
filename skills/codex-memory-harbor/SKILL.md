@@ -3,7 +3,7 @@ name: codex-memory-harbor
 description: Audit, search, recall, offload, verify, restore, and reclaim completed Codex child-task session logs on a permanently attached external drive. Use when Codex history consumes local disk space, the user asks to open Memory Harbor, or a prior decision, artifact, task result, or historical detail may live in offloaded Codex work.
 ---
 
-# Codex Memory Harbor
+# Memory Harbor
 
 Treat Codex session JSONL as recovery and audit evidence, not cache.
 
@@ -22,9 +22,9 @@ Treat Codex session JSONL as recovery and audit evidence, not cache.
 
 - Never offload main-task logs, the current task, a file with open handles, a session whose last turn is not complete, or a session inside the configured priority project.
 - Default to 30 days minimum age and dry-run mutations first. Time makes a session eligible; user-pinned projects or individual sessions always override time.
-- Copy, size-check, and SHA-256-check before replacing the source with an absolute symlink.
-- Keep `.offload-local-backup` until the user has verified Codex cold-reading and, preferably, a full restart plus drive remount.
-- Finalization is the only step that reclaims the rollback copy. Require explicit authorization immediately before it.
+- Treat **migration** and **backup retention** as different product choices. A confirmed dashboard migration copies, size-checks, SHA-256-checks, replaces the source with an absolute symlink, independently re-audits it, and then automatically removes the local entity. The confirmation dialog is the authorization for that selected batch.
+- If the user selects **同时保留本地备份**, keep `.offload-local-backup`; this does not reclaim that space. Deleting such a retained backup later requires a separate explicit confirmation.
+- Never remove the local entity unless the external target and source link pass the independent re-audit. If any step fails, stop the batch and preserve the recoverable local file or rollback copy.
 - Stop a batch on the first failure. Never silently skip a verification error.
 - Do not move the whole `sessions` root or active main tasks.
 - Do not index prompts, responses, tool output, browser state, or credentials in the local discovery catalog.

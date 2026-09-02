@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Codex Memory Harbor: local inventory, verified offload, recovery, and dashboard."""
+"""Memory Harbor: local inventory, verified offload, recovery, and dashboard."""
 
 from __future__ import annotations
 
@@ -26,8 +26,9 @@ from collections import deque
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "0.4.0-beta.1"
-DEFAULT_ARCHIVE = "Codex Memory Harbor"
+VERSION = "0.4.1-beta.1"
+DEFAULT_ARCHIVE = "Memory Harbor"
+LEGACY_ARCHIVES = ("Codex Memory Harbor",)
 CATALOG_SCHEMA_VERSION = 3
 MANIFEST_SCHEMA_VERSION = 2
 RECALL_EXTRACTION_VERSION = 1
@@ -977,52 +978,54 @@ def import_mounted_manifests(codex_home: Path, volumes: list[dict], archive_name
     thread_catalog = load_thread_catalog(codex_home)
     project_catalog = load_project_catalog(codex_home)
     with managed_catalog(codex_home) as connection:
+        archive_names = tuple(dict.fromkeys((archive_name, *LEGACY_ARCHIVES)))
         for volume in volumes:
-            manifest = Path(volume["path"]) / archive_name / "manifests" / "offload_manifest.jsonl"
-            if not manifest.is_file():
-                continue
-            try:
-                lines = manifest.read_text(encoding="utf-8", errors="replace").splitlines()
-            except OSError:
-                continue
-            for line in lines:
-                try:
-                    raw = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                source = str(raw.get("source") or "")
-                relative = manifest_relative(raw, archive_name)
-                if not source or not relative:
+            for manifest_archive_name in archive_names:
+                manifest = Path(volume["path"]) / manifest_archive_name / "manifests" / "offload_manifest.jsonl"
+                if not manifest.is_file():
                     continue
                 try:
-                    lexical_session(source, codex_home)
-                except HarborError:
-                    # A removable disk may contain manifests from several Macs
-                    # or CODEX_HOME roots. Never merge another root into this one.
+                    lines = manifest.read_text(encoding="utf-8", errors="replace").splitlines()
+                except OSError:
                     continue
-                target = Path(volume["path"]) / relative
-                item = {
-                    "path": source, "id": raw.get("id"), "parent_id": raw.get("parent_id"),
-                    "cwd": raw.get("cwd") or "", "agent_path": raw.get("agent_path") or "",
-                    "timestamp": raw.get("timestamp"), "kind": raw.get("kind") or "child",
-                }
-                attach_thread_title(item, thread_catalog)
-                attach_project(item, project_catalog)
-                catalog_upsert(connection, {
-                    "source_path": source, "thread_id": item.get("id"), "parent_id": item.get("parent_id"),
-                    "title": raw.get("title") or item.get("title"), "project_id": raw.get("project_id") or item.get("project_id"),
-                    "project_name": raw.get("project_name") or item.get("project_name"),
-                    "project_path": raw.get("project_path") or item.get("project_path"),
-                    "cwd": item.get("cwd"), "agent_path": item.get("agent_path"), "timestamp": item.get("timestamp"),
-                    "kind": item.get("kind"), "logical": raw.get("bytes", 0), "source_sha256": raw.get("sha256"),
-                    "linked": Path(source).is_symlink(), "source_present": Path(source).exists() or Path(source).is_symlink(),
-                    "target_path": str(target), "target_available": target.is_file(),
-                    "volume_uuid": raw.get("volume_uuid") or volume.get("uuid", ""),
-                    "volume_name": raw.get("volume_name") or volume.get("name", ""),
-                    "archive_relative": relative, "manifest_path": str(manifest),
-                    "manifest_recorded_at": raw.get("recorded_at", 0),
-                })
-                imported += 1
+                for line in lines:
+                    try:
+                        raw = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    source = str(raw.get("source") or "")
+                    relative = manifest_relative(raw, manifest_archive_name)
+                    if not source or not relative:
+                        continue
+                    try:
+                        lexical_session(source, codex_home)
+                    except HarborError:
+                        # A removable disk may contain manifests from several Macs
+                        # or CODEX_HOME roots. Never merge another root into this one.
+                        continue
+                    target = Path(volume["path"]) / relative
+                    item = {
+                        "path": source, "id": raw.get("id"), "parent_id": raw.get("parent_id"),
+                        "cwd": raw.get("cwd") or "", "agent_path": raw.get("agent_path") or "",
+                        "timestamp": raw.get("timestamp"), "kind": raw.get("kind") or "child",
+                    }
+                    attach_thread_title(item, thread_catalog)
+                    attach_project(item, project_catalog)
+                    catalog_upsert(connection, {
+                        "source_path": source, "thread_id": item.get("id"), "parent_id": item.get("parent_id"),
+                        "title": raw.get("title") or item.get("title"), "project_id": raw.get("project_id") or item.get("project_id"),
+                        "project_name": raw.get("project_name") or item.get("project_name"),
+                        "project_path": raw.get("project_path") or item.get("project_path"),
+                        "cwd": item.get("cwd"), "agent_path": item.get("agent_path"), "timestamp": item.get("timestamp"),
+                        "kind": item.get("kind"), "logical": raw.get("bytes", 0), "source_sha256": raw.get("sha256"),
+                        "linked": Path(source).is_symlink(), "source_present": Path(source).exists() or Path(source).is_symlink(),
+                        "target_path": str(target), "target_available": target.is_file(),
+                        "volume_uuid": raw.get("volume_uuid") or volume.get("uuid", ""),
+                        "volume_name": raw.get("volume_name") or volume.get("name", ""),
+                        "archive_relative": relative, "manifest_path": str(manifest),
+                        "manifest_recorded_at": raw.get("recorded_at", 0),
+                    })
+                    imported += 1
     return imported
 
 
@@ -1402,6 +1405,24 @@ def finalize_one(path_value: str, codex_home: Path) -> dict:
     return {**audit, "event": "local_backup_removed", "bytes_released": released, "bytes_released_h": human_bytes(released)}
 
 
+def migrate_one(plan: dict, volume: Path, archive_name: str, codex_home: Path) -> dict:
+    """Move one session to external primary storage and reclaim its local entity.
+
+    The rollback copy is removed only after offload_one has verified the external
+    copy and source link, and finalize_one has independently re-audited them.
+    Any failure before that point leaves a recoverable local file in place.
+    """
+    moved = offload_one(plan, volume, archive_name, codex_home)
+    finalized = finalize_one(plan["source"], codex_home)
+    return {
+        **moved,
+        "event": "migrated_external_primary",
+        "backup_exists": False,
+        "bytes_released": finalized["bytes_released"],
+        "bytes_released_h": finalized["bytes_released_h"],
+    }
+
+
 def restore_one(path_value: str, codex_home: Path) -> dict:
     source, _ = lexical_session(path_value, codex_home)
     if not source.is_symlink(): raise HarborError("Source is not an offload symlink")
@@ -1505,11 +1526,14 @@ class HarborHandler(BaseHTTPRequestHandler):
             if self.path == "/api/plan":
                 volume_value = resolve_storage_target(data)
                 for path in paths: results.append(plan_offload(path, self.app["codex_home"], volume_value, data.get("archive_name") or DEFAULT_ARCHIVE, float(data.get("min_age", 30)), data.get("priority") or None, self.app["protected_sessions"]))
-            elif self.path == "/api/offload":
+            elif self.path in ("/api/offload", "/api/migrate"):
                 volume = mounted_volume(resolve_storage_target(data)); archive = data.get("archive_name") or DEFAULT_ARCHIVE
                 for path in paths:
                     plan = plan_offload(path, self.app["codex_home"], str(volume), archive, float(data.get("min_age", 30)), data.get("priority") or None, self.app["protected_sessions"])
-                    results.append(offload_one(plan, volume, archive, self.app["codex_home"]))
+                    if self.path == "/api/migrate":
+                        results.append(migrate_one(plan, volume, archive, self.app["codex_home"]))
+                    else:
+                        results.append(offload_one(plan, volume, archive, self.app["codex_home"]))
             elif self.path == "/api/audit":
                 for path in paths: results.append(audit_one(path, self.app["codex_home"]))
             elif self.path == "/api/finalize":

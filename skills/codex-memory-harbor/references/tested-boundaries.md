@@ -52,4 +52,12 @@
   tree and the EP03 content match before termination.
 - Keyword retrieval is only a deterministic traceability baseline. Automatic associative recall, semantic false-positive evaluation, and topic-change routing are not yet implemented and must not be described as shipped.
 
-Do not describe unverified cases as supported. Preserve rollback copies until the local machine passes its own restart and remount checks.
+## Migration completion semantics, 2026-09-03
+
+- A real ten-task batch totaling 5,368,656,618 bytes was first copied, linked, and verified against Alex's Disk. Source link, external target, and local rollback hashes matched for all ten tasks before release.
+- After the user authorized finalization, all ten local rollback copies were removed. Internal free space rose from about 854 MB to 5.8 GB. A second audit found every source link and external target readable with no local rollback present.
+- Codex then cold-read all ten task histories from `notLoaded` state after local release. This proves external-only reads for that batch in the same runtime. A restart plus remount check for this ten-task batch remains pending; the earlier one-task pilot is still the only case with both checks completed.
+- Memory Harbor 0.4.1-beta.1 passed 25 local tests, including the real `/api/migrate` route, automatic local release after an independent re-audit, and preservation of the local backup when that re-audit fails. Python bytecode compilation, JavaScript syntax validation, Skill validation, Swift compilation, nested-helper signing, and full app-bundle signature verification also passed.
+- The installed 0.4.1 app rendered the default automatic-release explanation, exposed an unchecked “同时保留本地备份” option, toggled that option correctly, and returned to the task list without starting a migration when the confirmation was cancelled. The final performance gate measured 1.266 ms recall p95 and a 1.147-second scan of 518 sessions.
+
+Do not describe unverified cases as supported. On a new machine or storage device, choose “同时保留本地备份” until restart and remount checks pass.
