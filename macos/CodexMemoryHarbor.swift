@@ -3,8 +3,8 @@ import Cocoa
 final class CompactCardView: NSView {
     private let statusLabel = CompactCardView.label("检查中", size: 13, color: NSColor(calibratedWhite: 0.67, alpha: 1))
     private let eligibleLabel = CompactCardView.label("—", size: 52, weight: .bold)
-    private let headingLabel = CompactCardView.label("历史可访问", size: 12, color: NSColor(calibratedWhite: 0.67, alpha: 1))
-    private let noteLabel = CompactCardView.label("正在核验连续性", size: 12, color: NSColor(calibratedWhite: 0.67, alpha: 1))
+    private let headingLabel = CompactCardView.label("随时可以回来", size: 12, color: NSColor(calibratedWhite: 0.67, alpha: 1))
+    private let noteLabel = CompactCardView.label("正在看看记忆状态", size: 12, color: NSColor(calibratedWhite: 0.67, alpha: 1))
     private let driveLabel = CompactCardView.label("正在读取本机状态", size: 12, color: NSColor(calibratedWhite: 0.67, alpha: 1))
     private let driveDot = NSView()
 
@@ -66,7 +66,7 @@ final class CompactCardView: NSView {
         path.stroke()
     }
 
-    func showLoading() { statusLabel.stringValue = "正在更新" }
+    func showLoading() { statusLabel.stringValue = "正在更新记忆状态" }
 
     func update(summary: [String: Any]) {
         let available = summary["volume_available"] as? Bool ?? false
@@ -75,10 +75,10 @@ final class CompactCardView: NSView {
         let eligible = summary["eligible_files"] as? Int ?? 0
         let eligibleSize = summary["eligible_h"] as? String ?? ""
         let continuityHealthy = accessible == docked && (docked > 0 || available)
-        headingLabel.stringValue = "历史可访问"
+        headingLabel.stringValue = continuityHealthy ? "随时可以回来" : "重新连接后可回来"
         eligibleLabel.stringValue = "\(accessible) / \(docked)"
-        statusLabel.stringValue = continuityHealthy ? "连续性正常" : "连续性待恢复"
-        noteLabel.stringValue = eligible > 0 ? "另有 \(eligible) 项（\(eligibleSize)）可安全停泊" : "已停泊历史当前可读取"
+        statusLabel.stringValue = continuityHealthy ? "记忆都在" : "有些记忆暂时离线"
+        noteLabel.stringValue = eligible > 0 ? "另有 \(eligible) 项（\(eligibleSize)）可以安全停泊" : "\(accessible) 段历史已安全停泊"
         if available {
             let name = summary["volume_name"] as? String ?? "外置盘"
             let free = summary["volume_free_h"] as? String ?? ""
@@ -92,10 +92,10 @@ final class CompactCardView: NSView {
     }
 
     func showFailure() {
-        statusLabel.stringValue = "状态暂不可用"
-        headingLabel.stringValue = "连续性状态"
+        statusLabel.stringValue = "暂时看不清状态"
+        headingLabel.stringValue = "记忆状态"
         eligibleLabel.stringValue = "—"
-        noteLabel.stringValue = "没有执行任何停泊或释放操作"
+        noteLabel.stringValue = "没有移动或释放任何历史"
         driveLabel.stringValue = "打开详情后可重新扫描"
         driveDot.layer?.backgroundColor = NSColor.systemOrange.cgColor
     }

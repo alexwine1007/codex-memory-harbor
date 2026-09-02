@@ -55,11 +55,12 @@ class HarborTests(unittest.TestCase):
         handbook = (REPO_ROOT / "docs/handbook/README.md").read_text(encoding="utf-8")
         desktop = (REPO_ROOT / "docs/handbook/desktop-and-dashboard.md").read_text(encoding="utf-8")
         self.assertIn("technical handbook", readme)
-        self.assertIn("状态：草案 0.2", foundation)
-        self.assertIn("深空智能港", foundation)
-        for page in ("港口总览", "历史星图", "停泊队列", "完整性核心", "连接矩阵", "证据回执", "系统设置"):
+        self.assertIn("状态：草案 0.3", foundation)
+        self.assertIn("未来记忆港", foundation)
+        for page in ("港湾", "找回记忆", "安全停泊"):
             self.assertIn(page, foundation)
-        self.assertIn("正式界面不再使用“一键优化”", foundation)
+        self.assertIn("设备与连接", foundation)
+        self.assertIn("没有候选历史时，界面应该安静地说“今天不用整理”", foundation)
         self.assertIn("Runtime Adapter 开发 | 规划中", handbook)
         self.assertIn("唯一已交付的 Runtime Adapter 是 macOS 上的 Codex", handbook)
         self.assertIn("127.0.0.1，随机可用端口", desktop)
@@ -71,13 +72,16 @@ class HarborTests(unittest.TestCase):
         css = (prototype / "prototype.css").read_text(encoding="utf-8")
         javascript = (prototype / "prototype.js").read_text(encoding="utf-8")
         self.assertIn('lang="zh-CN"', html)
-        self.assertIn("视觉原型 · 中文界面 · 不连接真实数据与迁移操作", html)
-        self.assertIn("连续性核心在线", html)
-        for page in ("港口总览", "历史星图", "停泊队列", "完整性核心", "连接矩阵", "证据回执", "系统设置"):
+        self.assertIn("交互原型 · 全中文 · 使用样例数据 · 不会操作真实历史", html)
+        self.assertIn("你走过的路", html)
+        for page in ("港湾", "找回记忆", "安全停泊"):
             self.assertIn(page, html)
+        for secondary in ("设备与连接", "验证记录", "偏好设置"):
+            self.assertIn(secondary, html)
         self.assertIn("prefers-reduced-motion", css)
         self.assertIn("event.metaKey || event.ctrlKey", javascript)
-        self.assertIn("evidenceDrawer", javascript)
+        self.assertIn("memorySheet", html)
+        self.assertIn("runRecall", javascript)
         self.assertNotIn("fetch(", html + javascript)
 
     def test_skill_and_user_visible_errors_default_to_chinese(self):
@@ -85,6 +89,8 @@ class HarborTests(unittest.TestCase):
         agent = (REPO_ROOT / "skills/codex-memory-harbor/agents/openai.yaml").read_text(encoding="utf-8")
         source = SCRIPT.read_text(encoding="utf-8")
         self.assertIn("## 中文交付合同", skill)
+        self.assertIn("## 体验与表达", skill)
+        self.assertIn("想找回哪段经历？", skill)
         self.assertIn("查看停泊方案", skill)
         self.assertIn("打开中文仪表盘", agent)
         self.assertIn('print(f"错误 [{code}]：{message}"', source)
@@ -98,8 +104,8 @@ class HarborTests(unittest.TestCase):
         metadata = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
         readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
         self.assertIn('name = "memory-harbor"', metadata)
-        self.assertIn('version = "0.4.4b2"', metadata)
-        self.assertEqual(harbor.VERSION, "0.4.4-beta.2")
+        self.assertIn('version = "0.4.4b3"', metadata)
+        self.assertEqual(harbor.VERSION, "0.4.4-beta.3")
         self.assertEqual(readme.splitlines()[0], "# Memory Harbor")
         self.assertIn("canonical checkout directory is `memory-harbor`", readme)
         self.assertIn("`codex-memory-harbor` compatibility symlink", readme)
@@ -138,7 +144,8 @@ class HarborTests(unittest.TestCase):
         self.assertIn('MemoryHarbor.icns" "$HELPER/Contents/Resources', build)
         self.assertIn('$SKILL_DEST/scripts/harbor.py serve', install)
         self.assertIn('NSRemovableVolumesUsageDescription string Memory Harbor 需要访问你选择的存储设备', build)
-        self.assertIn('CompactCardView.label("历史可访问"', owner)
+        self.assertIn('CompactCardView.label("随时可以回来"', owner)
+        self.assertIn('statusLabel.stringValue = continuityHealthy ? "记忆都在"', owner)
         self.assertIn('NSButton(title: "打开港口"', owner)
 
     def test_dashboard_server_can_bind_an_ephemeral_port(self):

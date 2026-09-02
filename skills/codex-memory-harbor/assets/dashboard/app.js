@@ -86,7 +86,7 @@ function bindStoragePicker(){
 function render(){
   const totals=data.totals;
   $('#eligible').textContent=totals.eligible_h;
-  $('#heroText').textContent=`${totals.eligible_files} 个静置历史对象符合安全条件；停泊验证完成后才会释放本地实体。`;
+  $('#heroText').textContent=totals.eligible_files?`${totals.eligible_files} 段已经完成的历史符合安全条件；所有验证完成后才会释放本地文件。`:'今天不用整理；正在工作和受保护的历史都不会被打扰。';
   $('#free').textContent=data.disk.free_h;$('#diskBar').style.width=data.disk.used_percent+'%';
   $('#protected').textContent=totals.main_files+' 个';$('#linked').textContent=totals.linked_files+' 个';$('#rollback').textContent=totals.rollback_h;
   const recalled=data.catalog?.recall_sessions||0;
@@ -110,7 +110,7 @@ async function syncVolumes(){
   try{
     const response=await fetch('/api/volumes').then(result=>result.json());data.volumes=response.volumes||[];renderStorageTargets(data.volumes);
     const repair=await post('/api/repair-links',{});
-    if(repair.repaired?.length){toast(`已安全恢复 ${repair.repaired.length} 条外挂连接`);await refresh(false)}
+    if(repair.repaired?.length){toast(`已安全恢复 ${repair.repaired.length} 条存储连接`);await refresh(false)}
   }catch(error){$('#driveStatus').textContent='存储目的地 · 状态未知'}
 }
 window.harborVolumeChanged=syncVolumes;
@@ -124,10 +124,10 @@ function taskLabel(item){
 function taskTitle(item){return item.title||taskLabel(item)}
 function taskState(item){
   if(item.catalog_only&&!item.target_exists)return['仅索引可见','offline'];
-  if(item.catalog_only)return['外挂原件','linked'];
+  if(item.catalog_only)return['停泊原件','linked'];
   if(item.protected_session)return['永久保留','protected'];
   if(item.protected_project)return['项目保留','protected'];
-  if(item.linked&&!item.target_exists)return['目的地离线','offline'];
+  if(item.linked&&!item.target_exists)return['存储未连接','offline'];
   if(item.linked)return['已停泊','linked'];
   if(item.kind==='main')return['主任务','protected'];
   if(!item.last_turn_complete)return['进行中','active'];

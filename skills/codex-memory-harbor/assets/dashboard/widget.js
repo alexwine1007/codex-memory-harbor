@@ -5,7 +5,8 @@ let accessibleCount = 0;
 
 function showContinuity(volumeAvailable) {
   const healthy = accessibleCount === dockedCount && (dockedCount > 0 || volumeAvailable);
-  $('#status').textContent = healthy ? '连续性正常' : '连续性待恢复';
+  $('#status').textContent = healthy ? '记忆都在' : '有些记忆暂时离线';
+  $('#continuity-heading').textContent = healthy ? '随时可以回来' : '重新连接后可回来';
 }
 
 function showVolumes(volumes) {
@@ -32,7 +33,7 @@ async function scan() {
   $('#eligible').textContent = `${accessibleCount} / ${dockedCount}`;
   $('#continuity-note').textContent = data.totals.eligible_files
     ? `另有 ${data.totals.eligible_files} 项（${data.totals.eligible_h}）可安全停泊`
-    : '已停泊历史当前可读取';
+    : `${accessibleCount} 段历史已安全停泊`;
   showVolumes(data.volumes || []);
 }
 
@@ -53,7 +54,7 @@ async function load() {
     await scan();
     if (await repairLinks()) await scan();
   } catch (error) {
-    $('#status').textContent = '连续性状态暂不可用';
+    $('#status').textContent = '暂时看不清状态';
   }
 }
 
