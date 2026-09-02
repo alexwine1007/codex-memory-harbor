@@ -49,6 +49,26 @@ class HarborTests(unittest.TestCase):
         self.assertIn("**Native Continuity**", context)
         self.assertIn("one adapter makes a seam hypothetical; two adapters make it real", runtime_adr)
 
+    def test_frontend_foundation_and_handbook_keep_design_and_delivery_separate(self):
+        readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+        foundation = (REPO_ROOT / "docs/design/FRONTEND_FOUNDATION.md").read_text(encoding="utf-8")
+        handbook = (REPO_ROOT / "docs/handbook/README.md").read_text(encoding="utf-8")
+        desktop = (REPO_ROOT / "docs/handbook/desktop-and-dashboard.md").read_text(encoding="utf-8")
+        self.assertIn("technical handbook", readme)
+        self.assertIn("Status: Draft 0.1", foundation)
+        self.assertIn("continuity health > required attention > evidence", foundation)
+        self.assertIn("Overview", foundation)
+        self.assertIn("History", foundation)
+        self.assertIn("Docking", foundation)
+        self.assertIn("Integrity", foundation)
+        self.assertIn("Connections", foundation)
+        self.assertIn("Activity", foundation)
+        self.assertIn("Avoid `一键优化`", foundation)
+        self.assertIn("Runtime Adapter authoring | Planned", handbook)
+        self.assertIn("The only delivered Runtime Adapter is Codex", handbook)
+        self.assertIn("127.0.0.1, ephemeral port", desktop)
+        self.assertIn("current design debt", desktop.lower())
+
     def test_public_project_name_is_memory_harbor(self):
         metadata = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
         readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")

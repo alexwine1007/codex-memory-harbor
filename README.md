@@ -11,6 +11,11 @@ while cloud storage is deliberately shown as a future provider until verified lo
 materialization, offline behavior, integrity checks, and credential handling exist.
 See [PRODUCT.md](PRODUCT.md) for the product and continuity contract.
 
+Design and engineering documentation starts at the
+[technical handbook](docs/handbook/README.md). The current target interface and interaction
+contract live in the [frontend foundation](docs/design/FRONTEND_FOUNDATION.md); it is a draft,
+not a claim that the redesigned interface has shipped.
+
 It ships as three pieces that share one safety model:
 
 - a Codex Skill for guided audits and recovery;
