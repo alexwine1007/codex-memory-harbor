@@ -48,6 +48,20 @@ class HarborTests(unittest.TestCase):
         self.assertFalse(cloud["available"])
         with self.assertRaises(harbor.HarborError):
             harbor.resolve_storage_target({"storage_target":{"provider":"cloud","location":"memory-harbor://future"}})
+
+    def test_compact_summary_returns_no_session_inventory(self):
+        snapshot={
+            "totals":{"eligible_h":"2 GB","eligible_files":3},
+            "disk":{"free_h":"9 GB"},
+            "volumes":[{"writable":True,"name":"Archive","free_h":"80 GB"}],
+            "sessions":[{"private":"must not escape"}],
+        }
+        with mock.patch.object(harbor,"load_config",return_value={"protected_projects":[],"protected_sessions":[]}), \
+             mock.patch.object(harbor,"scan",return_value=snapshot):
+            result=harbor.compact_summary(Path("/tmp/codex"))
+        self.assertEqual(result["eligible_h"],"2 GB")
+        self.assertEqual(result["volume_name"],"Archive")
+        self.assertNotIn("sessions",result)
     def test_volume_identity_reads_persistent_diskutil_uuid(self):
         payload=plistlib.dumps({"VolumeUUID":"ABC-123","DeviceIdentifier":"disk9s1","FilesystemType":"exfat"})
         result=mock.Mock(returncode=0,stdout=payload)
@@ -96,6 +110,13 @@ class HarborTests(unittest.TestCase):
             result=harbor.catalog_search(root,"牙刷杯")[0]
             self.assertEqual(result["source_present"],0)
             self.assertEqual(harbor.catalog_status(root)["items"],1)
+
+    def test_search_does_not_create_a_catalog_when_none_exists(self):
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d)
+            self.assertEqual(harbor.catalog_search(root,"不存在"),[])
+            self.assertEqual(harbor.recall_search(root,"不存在"),[])
+            self.assertFalse(harbor.catalog_path(root).exists())
 
     def test_external_manifest_rebuilds_searchable_catalog(self):
         with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as v:
@@ -148,6 +169,96 @@ class HarborTests(unittest.TestCase):
             self.assertFalse(source.exists())
             self.assertEqual(os.readlink(source),"/Volumes/Old Name/Codex Memory Harbor/sessions/rollout-child.jsonl")
 
+    def test_recall_index_keeps_task_evidence_not_inherited_history_or_tools(self):
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d); path=root/"sessions/2026/01/01/rollout-recall.jsonl"; path.parent.mkdir(parents=True)
+            rows=[
+                {"type":"session_meta","payload":{"id":"recall-1","parent_thread_id":"parent-1","cwd":"/tmp/example","agent_path":"/root/research"}},
+                {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"继承噪声：喜欢红色。"}]}},
+                {"type":"response_item","payload":{"type":"agent_message","recipient":"/root/research","content":[{"type":"input_text","text":"Message Type: NEW_TASK\n<codex_delegation><input>核查海蓝色方案，api_key=supersecretvalue</input></codex_delegation>"}]}},
+                {"type":"response_item","payload":{"type":"function_call_output","output":"工具秘密 should-not-index"}},
+                {"timestamp":"2026-01-01T00:01:00Z","type":"event_msg","payload":{"type":"agent_message","message":"结论：海蓝色方案已经验证，保留来源证据。"}},
+                {"type":"event_msg","payload":{"type":"task_complete"}},
+            ]
+            path.write_text("\n".join(json.dumps(row,ensure_ascii=False) for row in rows)+"\n")
+            old=time.time()-40*86400; os.utime(path,(old,old))
+            harbor.scan(root,14)
+            first=harbor.index_session_memory(str(path),root)
+            second=harbor.index_session_memory(str(path),root)
+            self.assertEqual(first["fragments"],2)
+            self.assertEqual(second["fragments"],2)
+            self.assertFalse(first["unchanged"])
+            self.assertTrue(second["unchanged"])
+            result=harbor.recall_search(root,"海蓝色")[0]
+            self.assertEqual(result["thread_id"],"recall-1")
+            self.assertGreater(result["match_source_line"],0)
+            self.assertIn("海蓝色",result["match_excerpt"])
+            self.assertEqual(harbor.recall_search(root,"继承噪声"),[])
+            self.assertEqual(harbor.recall_search(root,"should-not-index"),[])
+            self.assertEqual(harbor.recall_search(root,"supersecretvalue"),[])
+            with harbor.managed_catalog(root) as connection:
+                content="\n".join(row[0] for row in connection.execute("SELECT content FROM harbor_fragments"))
+            self.assertIn("[REDACTED]",content)
+            self.assertEqual(harbor.catalog_status(root)["recall_sessions"],1)
+            cleared=harbor.clear_recall_index(root,[str(path)])
+            self.assertEqual(cleared["cleared_fragments"],2)
+            self.assertEqual(harbor.recall_search(root,"海蓝色"),[])
+
+    def test_recall_prefilter_rejects_large_tool_output_before_json_decode(self):
+        tool_line=json.dumps({"type":"response_item","payload":{"type":"function_call_output","output":"x"*20000}})
+        message_line=json.dumps({"type":"event_msg","payload":{"type":"agent_message","message":"useful"}})
+        self.assertFalse(harbor.recall_candidate_line(tool_line))
+        self.assertTrue(harbor.recall_candidate_line(message_line))
+
+    def test_legacy_child_without_task_boundary_stays_metadata_only(self):
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d); path=root/"sessions/legacy.jsonl"; path.parent.mkdir(parents=True)
+            rows=[
+                {"type":"session_meta","payload":{"id":"legacy-1","parent_thread_id":"parent-1","cwd":"/tmp/example"}},
+                {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"这是继承的父任务隐私"}]}},
+                {"type":"event_msg","payload":{"type":"task_complete"}},
+            ]
+            path.write_text("\n".join(json.dumps(row,ensure_ascii=False) for row in rows)+"\n")
+            self.assertEqual(harbor.recall_fragments_from_session(path),[])
+            harbor.scan(root,14)
+            result=harbor.index_session_memory(str(path),root)
+            self.assertEqual(result["thread_id"],"legacy-1")
+            self.assertTrue(result["metadata_only"])
+
+    def test_recall_survives_missing_source_with_provenance(self):
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d); path=root/"sessions/2026/01/01/rollout-memory.jsonl"; path.parent.mkdir(parents=True)
+            rows=[
+                {"type":"session_meta","payload":{"id":"memory-1","parent_thread_id":"parent-1","cwd":"/tmp/example","agent_path":"/root/audit"}},
+                {"type":"response_item","payload":{"type":"agent_message","recipient":"/root/audit","content":[{"type":"input_text","text":"Message Type: NEW_TASK\n<input>记录关键研发代号青鸟七号</input>"}]}},
+                {"type":"event_msg","payload":{"type":"task_complete"}},
+            ]
+            path.write_text("\n".join(json.dumps(row,ensure_ascii=False) for row in rows)+"\n")
+            old=time.time()-40*86400; os.utime(path,(old,old))
+            harbor.scan(root,14); harbor.index_session_memory(str(path),root)
+            path.unlink(); harbor.scan(root,14)
+            result=harbor.recall_search(root,"青鸟七号")[0]
+            self.assertEqual(result["source_present"],0)
+            self.assertEqual(result["match_role"],"instruction")
+            self.assertEqual(result["match_source_line"],2)
+
+    def test_recall_critical_path_does_not_probe_external_storage(self):
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d); path=root/"sessions/2026/01/01/rollout-memory.jsonl"; path.parent.mkdir(parents=True)
+            rows=[
+                {"type":"session_meta","payload":{"id":"memory-1","parent_thread_id":"parent-1","cwd":"/tmp/example","agent_path":"/root/audit"}},
+                {"type":"response_item","payload":{"type":"agent_message","recipient":"/root/audit","content":[{"type":"input_text","text":"Message Type: NEW_TASK\n<input>保留低延迟关键结论</input>"}]}},
+                {"type":"event_msg","payload":{"type":"task_complete"}},
+            ]
+            path.write_text("\n".join(json.dumps(row,ensure_ascii=False) for row in rows)+"\n")
+            harbor.scan(root,14); harbor.index_session_memory(str(path),root)
+            path.unlink(); harbor.scan(root,14)
+            with mock.patch.object(harbor,"available_volumes",side_effect=AssertionError("external probe on recall path")), \
+                 mock.patch.object(harbor,"sha256",side_effect=AssertionError("content hash on recall path")):
+                result=harbor.recall_search(root,"低延迟")[0]
+            self.assertEqual(result["thread_id"],"memory-1")
+            self.assertEqual(result["source_present"],0)
+
     def test_subagent_record_excludes_inherited_parent_history(self):
         with tempfile.TemporaryDirectory() as d:
             root=Path(d); path=root/"sessions/2026/01/01/rollout-child-1.jsonl"; path.parent.mkdir(parents=True)
@@ -175,9 +286,17 @@ class HarborTests(unittest.TestCase):
     def test_offload_audit_finalize_restore_cycle(self):
         with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as v:
             root=Path(d); p=self.fixture(root); volume=Path(v)
+            rows=[json.loads(line) for line in p.read_text().splitlines()]
+            rows[0]["payload"]["agent_path"]="/root/test"
+            rows.insert(-1,{"type":"response_item","payload":{"type":"agent_message","recipient":"/root/test","content":[{"type":"input_text","text":"Message Type: NEW_TASK"}]}})
+            rows.insert(-1,{"type":"event_msg","payload":{"type":"agent_message","message":"关键迁移结论白鹭编号"}})
+            p.write_text("\n".join(json.dumps(row,ensure_ascii=False) for row in rows)+"\n")
             original=p.read_bytes()
             plan={"source":str(p),"destination":str(volume/"Archive/sessions/rollout-test.jsonl"),"backup":str(p)+".offload-local-backup","bytes":p.stat().st_size,"bytes_h":harbor.human_bytes(p.stat().st_size),"sha256":harbor.sha256(p),"id":"child-1","cwd":"/tmp/example","open_handles":0}
-            moved=harbor.offload_one(plan,volume,"Archive")
+            harbor.scan(root,14)
+            moved=harbor.offload_one(plan,volume,"Archive",root)
+            self.assertEqual(moved["recall_fragments"],1)
+            self.assertEqual(harbor.recall_search(root,"白鹭编号")[0]["thread_id"],"child-1")
             self.assertTrue(p.is_symlink()); self.assertTrue(Path(moved["backup"]).is_file())
             self.assertTrue(harbor.audit_one(str(p),root)["verified"])
             harbor.finalize_one(str(p),root); self.assertFalse(Path(moved["backup"]).exists())

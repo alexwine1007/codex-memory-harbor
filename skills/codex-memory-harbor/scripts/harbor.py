@@ -26,10 +26,14 @@ from collections import deque
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "0.3.0-beta.1"
+VERSION = "0.4.0-beta.1"
 DEFAULT_ARCHIVE = "Codex Memory Harbor"
-CATALOG_SCHEMA_VERSION = 1
+CATALOG_SCHEMA_VERSION = 3
 MANIFEST_SCHEMA_VERSION = 2
+RECALL_EXTRACTION_VERSION = 1
+RECALL_CHUNK_CHARS = 6000
+RECALL_CHUNK_OVERLAP = 240
+RECALL_MAX_FRAGMENTS_PER_SESSION = 5000
 
 
 class HarborError(RuntimeError):
@@ -379,6 +383,32 @@ def open_catalog(codex_home: Path) -> sqlite3.Connection:
     """)
     connection.execute("CREATE INDEX IF NOT EXISTS harbor_items_thread_id ON harbor_items(thread_id)")
     connection.execute("CREATE INDEX IF NOT EXISTS harbor_items_project_id ON harbor_items(project_id)")
+    connection.execute("""
+        CREATE TABLE IF NOT EXISTS harbor_fragments (
+            fragment_id TEXT PRIMARY KEY,
+            source_path TEXT NOT NULL,
+            thread_id TEXT NOT NULL DEFAULT '',
+            role TEXT NOT NULL DEFAULT '',
+            content TEXT NOT NULL,
+            content_sha256 TEXT NOT NULL,
+            source_line INTEGER NOT NULL DEFAULT 0,
+            ordinal INTEGER NOT NULL DEFAULT 0,
+            timestamp TEXT,
+            indexed_at INTEGER NOT NULL DEFAULT 0,
+            FOREIGN KEY(source_path) REFERENCES harbor_items(source_path) ON DELETE CASCADE
+        )
+    """)
+    connection.execute("CREATE INDEX IF NOT EXISTS harbor_fragments_source_path ON harbor_fragments(source_path)")
+    connection.execute("CREATE INDEX IF NOT EXISTS harbor_fragments_thread_id ON harbor_fragments(thread_id)")
+    connection.execute("""
+        CREATE TABLE IF NOT EXISTS harbor_recall_state (
+            source_path TEXT PRIMARY KEY,
+            source_sha256 TEXT NOT NULL,
+            extraction_version INTEGER NOT NULL,
+            fragment_count INTEGER NOT NULL DEFAULT 0,
+            indexed_at INTEGER NOT NULL DEFAULT 0
+        )
+    """)
     connection.execute("CREATE TABLE IF NOT EXISTS harbor_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
     connection.execute(
         "INSERT OR REPLACE INTO harbor_meta(key, value) VALUES ('schema_version', ?)",
@@ -416,6 +446,41 @@ def open_catalog(codex_home: Path) -> sqlite3.Connection:
                 source_path UNINDEXED, thread_id, title, project_name, cwd, agent_path
             )
         """)
+    fragment_tokenizer_row = connection.execute("SELECT value FROM harbor_meta WHERE key='fragment_fts_tokenizer'").fetchone()
+    fragment_tokenizer = fragment_tokenizer_row[0] if fragment_tokenizer_row and fragment_tokenizer_row[0] in ("trigram", "unicode61") else None
+    if fragment_tokenizer is None:
+        try:
+            connection.execute("""
+                CREATE VIRTUAL TABLE harbor_fragments_fts USING fts5(
+                    source_path UNINDEXED, fragment_id UNINDEXED, role, content,
+                    tokenize='trigram'
+                )
+            """)
+            fragment_tokenizer = "trigram"
+        except sqlite3.Error:
+            connection.execute("""
+                CREATE VIRTUAL TABLE IF NOT EXISTS harbor_fragments_fts USING fts5(
+                    source_path UNINDEXED, fragment_id UNINDEXED, role, content
+                )
+            """)
+            fragment_tokenizer = "unicode61"
+        connection.execute(
+            "INSERT OR REPLACE INTO harbor_meta(key, value) VALUES ('fragment_fts_tokenizer', ?)",
+            (fragment_tokenizer,),
+        )
+    elif fragment_tokenizer == "trigram":
+        connection.execute("""
+            CREATE VIRTUAL TABLE IF NOT EXISTS harbor_fragments_fts USING fts5(
+                source_path UNINDEXED, fragment_id UNINDEXED, role, content,
+                tokenize='trigram'
+            )
+        """)
+    else:
+        connection.execute("""
+            CREATE VIRTUAL TABLE IF NOT EXISTS harbor_fragments_fts USING fts5(
+                source_path UNINDEXED, fragment_id UNINDEXED, role, content
+            )
+        """)
     return connection
 
 
@@ -425,6 +490,22 @@ def managed_catalog(codex_home: Path):
     try:
         with connection:
             yield connection
+    finally:
+        connection.close()
+
+
+@contextmanager
+def read_catalog(codex_home: Path):
+    """Open the compact catalog without creating files, WALs, or schema writes."""
+    path = catalog_path(codex_home)
+    if not path.is_file():
+        yield None
+        return
+    connection = sqlite3.connect(path.as_uri() + "?mode=ro", uri=True, timeout=2)
+    connection.row_factory = sqlite3.Row
+    try:
+        connection.execute("PRAGMA query_only = ON")
+        yield connection
     finally:
         connection.close()
 
@@ -516,7 +597,14 @@ def catalog_update_from_scan(codex_home: Path, sessions: list[dict], volumes: li
                 "last_seen_at": now,
             })
         count = connection.execute("SELECT COUNT(*) FROM harbor_items").fetchone()[0]
-    return {"path": str(catalog_path(codex_home)), "items": count, "updated_at": now}
+        fragment_row = connection.execute(
+            "SELECT COUNT(*) AS fragments, COUNT(DISTINCT source_path) AS sessions FROM harbor_fragments"
+        ).fetchone()
+    return {
+        "path": str(catalog_path(codex_home)), "items": count, "updated_at": now,
+        "recall_fragments": int(fragment_row["fragments"] or 0),
+        "recall_sessions": int(fragment_row["sessions"] or 0),
+    }
 
 
 def catalog_search(codex_home: Path, query: str, limit: int = 20) -> list[dict]:
@@ -524,7 +612,9 @@ def catalog_search(codex_home: Path, query: str, limit: int = 20) -> list[dict]:
     if not query:
         return []
     limit = max(1, min(int(limit), 100))
-    with managed_catalog(codex_home) as connection:
+    with read_catalog(codex_home) as connection:
+        if connection is None:
+            return []
         try:
             phrase = '"' + query.replace('"', '""') + '"'
             rows = connection.execute("""
@@ -557,12 +647,315 @@ def catalog_status(codex_home: Path) -> dict:
             FROM harbor_items
         """).fetchone()
         tokenizer = connection.execute("SELECT value FROM harbor_meta WHERE key='fts_tokenizer'").fetchone()
+        fragment_row = connection.execute(
+            "SELECT COUNT(*) AS fragments, COUNT(DISTINCT source_path) AS sessions FROM harbor_fragments"
+        ).fetchone()
+        fragment_tokenizer = connection.execute(
+            "SELECT value FROM harbor_meta WHERE key='fragment_fts_tokenizer'"
+        ).fetchone()
     return {
         "path": str(catalog_path(codex_home)), "schema_version": CATALOG_SCHEMA_VERSION,
         "items": int(row["items"] or 0), "present": int(row["present"] or 0),
         "linked": int(row["linked"] or 0), "targets_available": int(row["targets_available"] or 0),
         "updated_at": int(row["updated_at"] or 0), "fts_tokenizer": tokenizer[0] if tokenizer else "unknown",
+        "recall_fragments": int(fragment_row["fragments"] or 0),
+        "recall_sessions": int(fragment_row["sessions"] or 0),
+        "fragment_fts_tokenizer": fragment_tokenizer[0] if fragment_tokenizer else "unknown",
     }
+
+
+SENSITIVE_PATTERNS = (
+    re.compile(r"\b(?:sk|rk|pk)-[A-Za-z0-9_-]{12,}\b"),
+    re.compile(r"\bgh[pousr]_[A-Za-z0-9]{12,}\b", re.IGNORECASE),
+    re.compile(r"\bAKIA[A-Z0-9]{16}\b"),
+    re.compile(r"(?i)\b(api[_-]?key|access[_-]?token|refresh[_-]?token|password|passwd|secret)\b\s*[:=]\s*([^\s,;]{6,})"),
+)
+INJECTED_CONTEXT_TAGS = (
+    "environment_context", "in-app-browser-context", "app-context", "permissions",
+    "skills_instructions", "apps_instructions", "plugins_instructions", "recommended_plugins",
+)
+
+
+def redact_sensitive_text(value: str) -> str:
+    text = value
+    for pattern in SENSITIVE_PATTERNS:
+        if pattern.groups >= 2:
+            text = pattern.sub(lambda match: f"{match.group(1)}=[REDACTED]", text)
+        else:
+            text = pattern.sub("[REDACTED]", text)
+    return text
+
+
+def clean_recall_text(value: str) -> str:
+    text = html.unescape(str(value or ""))
+    for tag in INJECTED_CONTEXT_TAGS:
+        text = re.sub(rf"<{re.escape(tag)}\b[^>]*>.*?</{re.escape(tag)}>", " ", text, flags=re.IGNORECASE | re.DOTALL)
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
+    return redact_sensitive_text(text)
+
+
+def payload_text(payload: dict) -> str:
+    content = payload.get("content") or []
+    if isinstance(content, str):
+        return content
+    parts = []
+    for item in content if isinstance(content, list) else []:
+        if not isinstance(item, dict):
+            continue
+        if item.get("type") in ("input_text", "output_text", "text") and item.get("text"):
+            parts.append(str(item["text"]))
+    return "\n".join(parts)
+
+
+def chunk_recall_text(text: str):
+    if len(text) <= RECALL_CHUNK_CHARS:
+        yield text
+        return
+    step = RECALL_CHUNK_CHARS - RECALL_CHUNK_OVERLAP
+    for start in range(0, len(text), step):
+        chunk = text[start:start + RECALL_CHUNK_CHARS].strip()
+        if chunk:
+            yield chunk
+        if start + RECALL_CHUNK_CHARS >= len(text):
+            break
+
+
+def recall_candidate_line(line: str) -> bool:
+    """Reject large tool-output lines before JSON decoding."""
+    head = line[:8192]
+    return bool(
+        re.search(r'"type"\s*:\s*"(?:response_item|event_msg)"', head)
+        and re.search(r'"type"\s*:\s*"(?:message|agent_message)"', head)
+    )
+
+
+def recall_fragments_from_session(path: Path) -> list[dict]:
+    """Extract task-specific human/assistant evidence while excluding tool and inherited history."""
+    meta = first_metadata(path)
+    thread_id = str(meta.get("id") or "")
+    agent_path = str(meta.get("agent_path") or "")
+    if meta.get("parent_thread_id") and not agent_path:
+        # Legacy child/fork records can contain inherited parent turns without a
+        # trustworthy task boundary. Metadata discovery is safer than false recall.
+        return []
+    started = not bool(agent_path)
+    raw_fragments = []
+    with path.open("r", encoding="utf-8", errors="replace") as stream:
+        for line_number, line in enumerate(stream, 1):
+            if not recall_candidate_line(line):
+                continue
+            try:
+                value = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            payload = value.get("payload") or {}
+            if agent_path and not started:
+                if value.get("type") != "response_item" or payload.get("type") != "agent_message":
+                    continue
+                recipient = str(payload.get("recipient") or "")
+                marker = payload_text(payload)
+                if recipient != agent_path or "Message Type: NEW_TASK" not in marker:
+                    continue
+                started = True
+                match = re.search(r"<input>(.*?)</input>", marker, flags=re.DOTALL | re.IGNORECASE)
+                if match:
+                    raw_fragments.append(("instruction", match.group(1), line_number, value.get("timestamp")))
+                continue
+            if not started:
+                continue
+            if agent_path:
+                if value.get("type") == "event_msg" and payload.get("type") == "agent_message":
+                    raw_fragments.append(("assistant", str(payload.get("message") or ""), line_number, value.get("timestamp")))
+                continue
+            if value.get("type") != "response_item" or payload.get("type") != "message":
+                continue
+            role = str(payload.get("role") or "")
+            if role in ("user", "assistant"):
+                raw_fragments.append((role, payload_text(payload), line_number, value.get("timestamp")))
+    fragments = []
+    ordinal = 0
+    for role, raw_text, line_number, timestamp in raw_fragments:
+        cleaned = clean_recall_text(raw_text)
+        if not cleaned:
+            continue
+        for chunk in chunk_recall_text(cleaned):
+            ordinal += 1
+            digest = hashlib.sha256(chunk.encode("utf-8")).hexdigest()
+            fragment_id = hashlib.sha256(f"{path.absolute()}\0{line_number}\0{ordinal}\0{digest}".encode()).hexdigest()
+            fragments.append({
+                "fragment_id": fragment_id, "source_path": str(path.absolute()), "thread_id": thread_id,
+                "role": role, "content": chunk, "content_sha256": digest,
+                "source_line": line_number, "ordinal": ordinal, "timestamp": timestamp,
+            })
+            if len(fragments) >= RECALL_MAX_FRAGMENTS_PER_SESSION:
+                return fragments
+    return fragments
+
+
+def index_session_memory(path_value: str, codex_home: Path, expected_sha256: str | None = None) -> dict:
+    source, _ = lexical_session(path_value, codex_home)
+    if not source.exists():
+        raise HarborError("Session evidence is unavailable; reconnect its archive before indexing")
+    metadata = first_metadata(source)
+    with managed_catalog(codex_home) as connection:
+        item = connection.execute("SELECT source_sha256 FROM harbor_items WHERE source_path = ?", (str(source),)).fetchone()
+        state = connection.execute("SELECT * FROM harbor_recall_state WHERE source_path = ?", (str(source),)).fetchone()
+    source_digest = str(expected_sha256 or (item["source_sha256"] if item else "") or sha256(source))
+    if state and state["source_sha256"] == source_digest and int(state["extraction_version"]) == RECALL_EXTRACTION_VERSION:
+        return {
+            "source": str(source), "thread_id": str(metadata.get("id") or ""),
+            "fragments": int(state["fragment_count"]),
+            "metadata_only": bool(metadata.get("parent_thread_id") and not metadata.get("agent_path")),
+            "indexed_at": int(state["indexed_at"]), "unchanged": True,
+        }
+    fragments = recall_fragments_from_session(source)
+    now = int(time.time())
+    with managed_catalog(codex_home) as connection:
+        connection.execute("DELETE FROM harbor_fragments_fts WHERE source_path = ?", (str(source),))
+        connection.execute("DELETE FROM harbor_fragments WHERE source_path = ?", (str(source),))
+        for fragment in fragments:
+            connection.execute("""
+                INSERT INTO harbor_fragments(
+                    fragment_id, source_path, thread_id, role, content, content_sha256,
+                    source_line, ordinal, timestamp, indexed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                fragment["fragment_id"], fragment["source_path"], fragment["thread_id"],
+                fragment["role"], fragment["content"], fragment["content_sha256"],
+                fragment["source_line"], fragment["ordinal"], fragment["timestamp"], now,
+            ))
+            connection.execute(
+                "INSERT INTO harbor_fragments_fts(source_path, fragment_id, role, content) VALUES (?, ?, ?, ?)",
+                (fragment["source_path"], fragment["fragment_id"], fragment["role"], fragment["content"]),
+            )
+        connection.execute("""
+            INSERT INTO harbor_recall_state(source_path, source_sha256, extraction_version, fragment_count, indexed_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(source_path) DO UPDATE SET
+                source_sha256=excluded.source_sha256,
+                extraction_version=excluded.extraction_version,
+                fragment_count=excluded.fragment_count,
+                indexed_at=excluded.indexed_at
+        """, (str(source), source_digest, RECALL_EXTRACTION_VERSION, len(fragments), now))
+    return {
+        "source": str(source), "thread_id": str(metadata.get("id") or ""),
+        "fragments": len(fragments),
+        "metadata_only": bool(metadata.get("parent_thread_id") and not metadata.get("agent_path")),
+        "indexed_at": now, "unchanged": False,
+    }
+
+
+def excerpt_for_query(content: str, query: str, maximum: int = 260) -> str:
+    compact = re.sub(r"\s+", " ", content).strip()
+    index = compact.casefold().find(query.casefold())
+    if index < 0:
+        return compact[:maximum] + ("…" if len(compact) > maximum else "")
+    start = max(0, index - maximum // 3)
+    end = min(len(compact), start + maximum)
+    prefix = "…" if start else ""
+    suffix = "…" if end < len(compact) else ""
+    return prefix + compact[start:end] + suffix
+
+
+def recall_search(codex_home: Path, query: str, limit: int = 20) -> list[dict]:
+    query = clean_index_text(query, 300)
+    if not query:
+        return []
+    limit = max(1, min(int(limit), 100))
+    with read_catalog(codex_home) as connection:
+        if connection is None:
+            return []
+        try:
+            phrase = '"' + query.replace('"', '""') + '"'
+            rows = connection.execute("""
+                SELECT i.*, f.fragment_id, f.role AS match_role, f.content AS match_content,
+                       f.source_line AS match_source_line, f.timestamp AS match_timestamp,
+                       bm25(harbor_fragments_fts) AS score
+                FROM harbor_fragments_fts x
+                JOIN harbor_fragments f ON f.fragment_id = x.fragment_id
+                JOIN harbor_items i ON i.source_path = f.source_path
+                WHERE harbor_fragments_fts MATCH ?
+                ORDER BY score, COALESCE(f.timestamp, i.timestamp) DESC LIMIT ?
+            """, (phrase, limit * 3)).fetchall()
+        except sqlite3.Error:
+            rows = []
+        if not rows:
+            needle = f"%{query}%"
+            rows = connection.execute("""
+                SELECT i.*, f.fragment_id, f.role AS match_role, f.content AS match_content,
+                       f.source_line AS match_source_line, f.timestamp AS match_timestamp, 0.0 AS score
+                FROM harbor_fragments f JOIN harbor_items i USING(source_path)
+                WHERE f.content LIKE ? ORDER BY COALESCE(f.timestamp, i.timestamp) DESC LIMIT ?
+            """, (needle, limit * 3)).fetchall()
+    combined = []
+    seen = set()
+    for row in rows:
+        item = dict(row)
+        source = item["source_path"]
+        if source in seen:
+            continue
+        seen.add(source)
+        content = item.pop("match_content", "")
+        item["match_excerpt"] = excerpt_for_query(content, query)
+        item["match_kind"] = "content"
+        item["evidence_untrusted"] = True
+        combined.append(item)
+        if len(combined) >= limit:
+            return combined
+    for item in catalog_search(codex_home, query, limit):
+        source = item["source_path"]
+        if source in seen:
+            continue
+        item["match_kind"] = "metadata"
+        item["evidence_untrusted"] = True
+        combined.append(item)
+        seen.add(source)
+        if len(combined) >= limit:
+            break
+    return combined
+
+
+def build_recall_index(codex_home: Path, paths: list[str] | None = None, linked_only: bool = True) -> dict:
+    config = load_config()
+    snapshot = scan(codex_home, 30, config["protected_projects"], config["protected_sessions"])
+    requested = set(paths or [])
+    candidates = [
+        item for item in snapshot["sessions"]
+        if (not requested or item["path"] in requested)
+        and item["kind"] == "child"
+        and (item["linked"] if linked_only and not requested else True)
+        and (item["target_exists"] or not item["linked"])
+    ]
+    results, errors = [], []
+    for item in candidates:
+        try:
+            results.append(index_session_memory(item["path"], codex_home))
+        except (HarborError, OSError, ValueError, json.JSONDecodeError) as exc:
+            errors.append({"source": item["path"], "error": str(exc)})
+    return {
+        "sessions": len(results), "fragments": sum(item["fragments"] for item in results),
+        "unchanged": sum(bool(item.get("unchanged")) for item in results),
+        "errors": errors, "results": results,
+    }
+
+
+def clear_recall_index(codex_home: Path, paths: list[str] | None = None) -> dict:
+    with managed_catalog(codex_home) as connection:
+        if paths:
+            normalized = [str(lexical_session(path, codex_home)[0]) for path in paths]
+            placeholders = ",".join("?" for _ in normalized)
+            before = connection.execute(
+                f"SELECT COUNT(*) FROM harbor_fragments WHERE source_path IN ({placeholders})", normalized
+            ).fetchone()[0]
+            connection.execute(f"DELETE FROM harbor_fragments_fts WHERE source_path IN ({placeholders})", normalized)
+            connection.execute(f"DELETE FROM harbor_fragments WHERE source_path IN ({placeholders})", normalized)
+            connection.execute(f"DELETE FROM harbor_recall_state WHERE source_path IN ({placeholders})", normalized)
+        else:
+            before = connection.execute("SELECT COUNT(*) FROM harbor_fragments").fetchone()[0]
+            connection.execute("DELETE FROM harbor_fragments_fts")
+            connection.execute("DELETE FROM harbor_fragments")
+            connection.execute("DELETE FROM harbor_recall_state")
+    return {"cleared_fragments": int(before), "paths": len(paths or [])}
 
 
 def manifest_relative(record: dict, archive_name: str) -> str:
@@ -905,6 +1298,26 @@ def scan(codex_home: Path, min_age: float = 30, priority=None, protected_session
     }
 
 
+def compact_summary(codex_home: Path, repair: bool = False) -> dict:
+    """Return only the values needed by the native idle card."""
+    if repair:
+        volumes = available_volumes()
+        import_mounted_manifests(codex_home, volumes)
+        repair_links_by_volume_identity(codex_home, volumes)
+    config = load_config()
+    snapshot = scan(codex_home, 30, config["protected_projects"], config["protected_sessions"])
+    volume = next((item for item in snapshot["volumes"] if item.get("writable")), None)
+    return {
+        "version": VERSION,
+        "eligible_h": snapshot["totals"]["eligible_h"],
+        "eligible_files": snapshot["totals"]["eligible_files"],
+        "disk_free_h": snapshot["disk"]["free_h"],
+        "volume_available": bool(volume),
+        "volume_name": volume.get("name", "") if volume else "",
+        "volume_free_h": volume.get("free_h", "") if volume else "",
+    }
+
+
 def append_manifest(volume: Path, archive_name: str, record: dict) -> str:
     manifest = volume / archive_name / "manifests" / "offload_manifest.jsonl"
     manifest.parent.mkdir(parents=True, exist_ok=True)
@@ -946,8 +1359,9 @@ def plan_offload(path_value: str, codex_home: Path, volume_value: str, archive_n
     }
 
 
-def offload_one(plan: dict, volume: Path, archive_name: str) -> dict:
+def offload_one(plan: dict, volume: Path, archive_name: str, codex_home: Path | None = None) -> dict:
     source, destination, backup = Path(plan["source"]), Path(plan["destination"]), Path(plan["backup"])
+    recall_result = index_session_memory(str(source), codex_home, plan.get("sha256")) if codex_home else None
     destination.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(source, destination)
     if destination.stat().st_size != plan["bytes"] or sha256(destination) != plan["sha256"]:
@@ -961,6 +1375,8 @@ def offload_one(plan: dict, volume: Path, archive_name: str) -> dict:
     except Exception:
         source.unlink(missing_ok=True); os.replace(backup, source); raise
     record = {**plan, "event": "offloaded_with_local_backup", "recorded_at": int(time.time())}
+    if recall_result:
+        record["recall_fragments"] = recall_result["fragments"]
     record["manifest"] = append_manifest(volume, archive_name, record)
     return record
 
@@ -1040,6 +1456,11 @@ class HarborHandler(BaseHTTPRequestHandler):
             query = q.get("q", [""])[0]
             limit = int(q.get("limit", ["30"])[0])
             return self.send_json(200, {"query": query, "results": catalog_search(self.app["codex_home"], query, limit)})
+        if parsed.path == "/api/recall":
+            q = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
+            query = q.get("q", [""])[0]
+            limit = int(q.get("limit", ["30"])[0])
+            return self.send_json(200, {"query": query, "results": recall_search(self.app["codex_home"], query, limit)})
         if parsed.path == "/api/config": return self.send_json(200, {"token": self.app["token"], "version": VERSION, "priority": self.app["priority"], "protected_projects": parse_projects(self.app["priority"]), "protected_sessions": self.app["protected_sessions"]})
         asset = "index.html" if parsed.path in ("/", "") else parsed.path.lstrip("/")
         file = (self.app["assets"] / asset).resolve()
@@ -1073,6 +1494,11 @@ class HarborHandler(BaseHTTPRequestHandler):
                 repaired = repair_links_by_volume_identity(self.app["codex_home"], available_volumes())
                 self.app["cache"] = None
                 return self.send_json(200, {"ok": True, "repaired": repaired})
+            if self.path == "/api/build-recall-index":
+                result = build_recall_index(
+                    self.app["codex_home"], data.get("paths") or None, bool(data.get("linked_only", True))
+                )
+                return self.send_json(200, {"ok": not bool(result["errors"]), **result})
             paths = data.get("paths") or []
             if not paths: raise HarborError("No sessions selected")
             results = []
@@ -1083,7 +1509,7 @@ class HarborHandler(BaseHTTPRequestHandler):
                 volume = mounted_volume(resolve_storage_target(data)); archive = data.get("archive_name") or DEFAULT_ARCHIVE
                 for path in paths:
                     plan = plan_offload(path, self.app["codex_home"], str(volume), archive, float(data.get("min_age", 30)), data.get("priority") or None, self.app["protected_sessions"])
-                    results.append(offload_one(plan, volume, archive))
+                    results.append(offload_one(plan, volume, archive, self.app["codex_home"]))
             elif self.path == "/api/audit":
                 for path in paths: results.append(audit_one(path, self.app["codex_home"]))
             elif self.path == "/api/finalize":
@@ -1117,9 +1543,13 @@ def main() -> int:
     serve_p = sub.add_parser("serve"); serve_p.add_argument("--port", type=int, default=48765); serve_p.add_argument("--open", action="store_true")
     audit_p = sub.add_parser("audit"); audit_p.add_argument("path")
     search_p = sub.add_parser("search"); search_p.add_argument("query"); search_p.add_argument("--limit", type=int, default=20)
+    recall_p = sub.add_parser("recall"); recall_p.add_argument("query"); recall_p.add_argument("--limit", type=int, default=20)
+    recall_index_p = sub.add_parser("build-recall-index"); recall_index_p.add_argument("paths", nargs="*"); recall_index_p.add_argument("--all-child", action="store_true")
+    recall_clear_p = sub.add_parser("clear-recall-index"); recall_clear_p.add_argument("paths", nargs="*")
     sub.add_parser("rebuild-index")
     sub.add_parser("index-status")
     sub.add_parser("repair-links")
+    compact_p = sub.add_parser("compact-status"); compact_p.add_argument("--repair-links", action="store_true")
     args = parser.parse_args()
     home = Path(args.codex_home or os.environ.get("CODEX_HOME", "~/.codex")).expanduser().absolute()
     try:
@@ -1132,12 +1562,22 @@ def main() -> int:
             if not catalog_path(home).is_file():
                 config = load_config(); scan(home, 30, config["protected_projects"], config["protected_sessions"])
             print(json.dumps({"query": args.query, "results": catalog_search(home, args.query, args.limit)}, ensure_ascii=False, indent=2))
+        elif args.command == "recall":
+            if not catalog_path(home).is_file():
+                config = load_config(); scan(home, 30, config["protected_projects"], config["protected_sessions"])
+            print(json.dumps({"query": args.query, "results": recall_search(home, args.query, args.limit)}, ensure_ascii=False, indent=2))
+        elif args.command == "build-recall-index":
+            print(json.dumps(build_recall_index(home, args.paths or None, not args.all_child), ensure_ascii=False, indent=2))
+        elif args.command == "clear-recall-index":
+            print(json.dumps(clear_recall_index(home, args.paths or None), ensure_ascii=False, indent=2))
         elif args.command == "rebuild-index":
             config = load_config(); print(json.dumps(rebuild_catalog(home, 30, config["protected_projects"], config["protected_sessions"]), ensure_ascii=False, indent=2))
         elif args.command == "index-status": print(json.dumps(catalog_status(home), ensure_ascii=False, indent=2))
         elif args.command == "repair-links":
             volumes = available_volumes(); import_mounted_manifests(home, volumes)
             print(json.dumps({"repaired": repair_links_by_volume_identity(home, volumes)}, ensure_ascii=False, indent=2))
+        elif args.command == "compact-status":
+            print(json.dumps(compact_summary(home, args.repair_links), ensure_ascii=False))
     except (HarborError, OSError, ValueError, json.JSONDecodeError) as exc:
         print(f"error: {exc}", file=sys.stderr); return 1
     return 0

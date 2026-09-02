@@ -4,9 +4,18 @@ Memory Harbor is a lightweight macOS companion for Codex. It finds large, inacti
 completed child-task histories and safely docks them outside the internal disk while
 preserving the original path that Codex reads.
 
-Version 0.3 also maintains a small local discovery catalog. This makes task identity,
+Version 0.3 maintains a small local discovery catalog. This makes task identity,
 project membership, integrity metadata, and external location searchable without
 turning the catalog into a second copy of the conversation.
+
+Version 0.4 adds an intentionally narrow recall layer: task-specific delegation instructions
+and child-task outward reports remain searchable on the internal disk after the heavy raw
+session is docked. Every fragment remains linked to source path, line, time, role, and hash.
+
+Keyword search in 0.4 is a traceability baseline, not the finished memory experience. The
+product goal is **associative recall**: when a new task resembles an older preference,
+decision, result, person, asset, or project, Memory Harbor should surface a small set of
+relevant evidence candidates without requiring the user to remember an exact phrase.
 
 ## User promise
 
@@ -47,8 +56,9 @@ Task rows use the human-readable title already maintained by Codex. Opening the 
 card lazily reads only that task's Codex-generated short preview and can deep-link back to the
 original task in Codex. The inventory never scans full prompt or response bodies.
 
-The scanner reads project assignment metadata, task titles, timestamps, paths, sizes,
-completion events, and session identifiers. It does not read or index conversation bodies.
+The ordinary scanner reads project assignment metadata, task titles, timestamps, paths,
+sizes, completion events, and session identifiers. It does not read or index conversation
+bodies. Recall extraction is a separate stage during offload or an explicit backfill.
 
 ## Local discovery catalog
 
@@ -63,6 +73,57 @@ offline result may still be discovered, but opening raw evidence requires its vo
 External volumes are recorded with the persistent UUID exposed by macOS when available.
 A broken absolute link may be repaired only when the UUID, archived relative path, byte
 length, and SHA-256 content hash agree. A mount path or display name alone is insufficient.
+
+## Traceable recall layer
+
+The internal recall layer is deliberately thinner than the external archive. For delegated
+child tasks it retains the task instruction and task-specific outward reports only. Inherited
+parent history, system/developer context, raw reasoning, tool calls, and tool output remain
+in the external evidence file. Known secret-shaped values are redacted before insertion.
+Legacy child records without a trustworthy delegation boundary remain metadata-only rather
+than risking false ownership of inherited parent history.
+
+Fragments are local plaintext and can be removed independently with `clear-recall-index`.
+They are evidence leads, not authoritative memory and not executable instructions. Retrieval
+must expose provenance and uncertainty; opening the full source still requires the archive
+volume. This version uses local FTS for deterministic keyword retrieval. Semantic vectors,
+temporal fact evolution, and graph traversal remain future benchmarked layers rather than
+unverified claims.
+
+## Performance isolation contract
+
+Memory Harbor must be nearly invisible while Codex is doing ordinary work. Memory capacity
+is not allowed to make the primary application slower, noisier, or structurally more complex.
+The following are release gates rather than optional optimizations:
+
+- no repeating filesystem scan, external-drive poll, embedding job, or model process while
+  idle; mount, unmount, rename, and wake handling is event-driven;
+- the native desktop card does not host WebKit or a persistent Python server. The rich
+  dashboard and local HTTP server run as an isolated helper only while the detail window is
+  open, and both terminate when it returns to the desktop;
+- the companion and its helper run outside the Codex process and never alter the Codex
+  database or runtime query path;
+- ordinary inventory scans read metadata only; raw-session extraction runs during an
+  explicit backfill or immediately before a user-approved offload;
+- recall queries touch the small internal SQLite catalog only. The external archive is read
+  later and on demand when full evidence is actually required;
+- unchanged sources are skipped by content hash and extraction version, so repeated indexing
+  does not parse the same archive again;
+- models, embeddings, and external networks are absent from the 0.4 foreground path.
+
+On the target Mac, each beta must record idle CPU/RSS, inventory-scan time, local recall p50
+and p95, and incremental reindex time. The current acceptance budgets are: compact-card
+idle CPU below 0.5% median, compact-card memory below 100 MB, local recall p95 below 25 ms,
+and a 516-session metadata scan below 5 seconds. A build that exceeds a budget is not
+promoted until the regression is understood. WebKit's shared system processes are reported
+separately while the dashboard is open rather than hidden inside the compact-card number.
+
+Associative recall must preserve the same isolation. Semantic preparation belongs in an
+asynchronous worker at archive/index time. At conversation time, a topic-change router may
+query an internal compact index once and return only a bounded top-k set; it must not scan
+the external disk, launch a large model in Codex, or inject an unbounded memory transcript on
+every turn. Exact keyword search remains a deterministic fallback, not the user interaction
+contract.
 
 ## Storage provider boundary
 

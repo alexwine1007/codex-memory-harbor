@@ -23,13 +23,15 @@ async function refresh(resetOrder=true){if(resetOrder){frozenProjectOrder=null;p
 function isProtectedProject(path){return(config.protected_projects||[]).some(project=>path===project||path.startsWith(project+'/'))}
 function indexedItems(){
   if(!searchMatches)return data.sessions;
+  const matches=new Map(searchResults.map(item=>[item.source_path,item]));
+  const local=data.sessions.map(item=>matches.has(item.path)?{...item,match_excerpt:matches.get(item.path).match_excerpt,match_role:matches.get(item.path).match_role,match_source_line:matches.get(item.path).match_source_line}:item);
   const known=new Set(data.sessions.map(item=>item.path));
   const indexed=searchResults.filter(item=>!known.has(item.source_path)).map(item=>{
     const timestamp=item.timestamp?new Date(item.timestamp):null;
     const age=timestamp&&!Number.isNaN(timestamp.getTime())?Math.max(0,Math.round((Date.now()-timestamp.getTime())/8640000)/10):null;
-    return{path:item.source_path,name:item.source_path.split('/').pop()||'索引记录',id:item.thread_id,parent_id:item.parent_id,title:item.title,project_id:item.project_id,project_name:item.project_name,project_path:item.project_path,cwd:item.cwd,agent_path:item.agent_path,timestamp:item.timestamp,kind:item.kind||'child',logical:Number(item.logical)||0,logical_h:fmt(Number(item.logical)||0),age_days:age,linked:Boolean(item.linked),target:item.target_path,target_exists:Boolean(item.target_available),source_present:Boolean(item.source_present),catalog_only:true,eligible:false,last_turn_complete:true,protected_session:false,protected_project:false};
+    return{path:item.source_path,name:item.source_path.split('/').pop()||'索引记录',id:item.thread_id,parent_id:item.parent_id,title:item.title,project_id:item.project_id,project_name:item.project_name,project_path:item.project_path,cwd:item.cwd,agent_path:item.agent_path,timestamp:item.timestamp,kind:item.kind||'child',logical:Number(item.logical)||0,logical_h:fmt(Number(item.logical)||0),age_days:age,linked:Boolean(item.linked),target:item.target_path,target_exists:Boolean(item.target_available),source_present:Boolean(item.source_present),catalog_only:true,eligible:false,last_turn_complete:true,protected_session:false,protected_project:false,match_excerpt:item.match_excerpt,match_role:item.match_role,match_source_line:item.match_source_line};
   });
-  return[...data.sessions,...indexed];
+  return[...local,...indexed];
 }
 function groups(){
   const map=new Map();
@@ -86,7 +88,8 @@ function render(){
   $('#heroText').textContent=`${totals.eligible_files} 个静置子任务符合安全条件；迁移后先保留回滚，不会立即删除。`;
   $('#free').textContent=data.disk.free_h;$('#diskBar').style.width=data.disk.used_percent+'%';
   $('#protected').textContent=totals.main_files+' 个';$('#linked').textContent=totals.linked_files+' 个';$('#rollback').textContent=totals.rollback_h;
-  $('#catalogStatus').textContent=`本地索引 ${data.catalog?.items??totals.files} 项`;
+  const recalled=data.catalog?.recall_sessions||0;
+  $('#catalogStatus').textContent=`本地索引 ${data.catalog?.items??totals.files} 项${recalled?` · ${recalled} 项可内容召回`:''}`;
   renderStorageTargets(data.volumes||[]);renderProjects();updateSelection();
 }
 
@@ -95,7 +98,7 @@ async function runSearch(){
   $('#clearSearch').hidden=!query;
   if(!query){searchMatches=null;searchResults=[];renderProjects();return}
   try{
-    const response=await fetch('/api/search?'+new URLSearchParams({q:query,limit:100})).then(result=>result.json());
+    const response=await fetch('/api/recall?'+new URLSearchParams({q:query,limit:100})).then(result=>result.json());
     searchResults=response.results||[];
     searchMatches=new Set(searchResults.map(item=>item.source_path));
     expandedGroups.clear();for(const group of groups())if(group.items.some(item=>searchMatches.has(item.path)))expandedGroups.add(group.key);
@@ -135,7 +138,8 @@ function renderTask(item){
   const [state,stateClass]=taskState(item);
   const checked=selected.has(item.path);
   const age=item.age_days==null?'时间未知':`${item.age_days} 天前`;
-  return`<div class="task-row ${checked?'selected':''}" data-task-row="${esc(item.path)}"><span class="branch-line"></span><input type="checkbox" data-task="${esc(item.path)}" ${checked?'checked':''} ${selectable?'':'disabled'}><span class="task-icon">${item.kind==='main'?'◆':'◇'}</span><button class="task-name task-title-button" data-detail-task="${esc(item.id||'')}"><b>${esc(taskTitle(item))}</b><span>${esc(taskLabel(item))} · ${esc(item.name)}</span></button><span class="task-size">${item.logical_h}</span><span class="task-age">${age}</span><span class="task-state ${stateClass}">${state}</span>${item.id?`<button class="task-inspect" data-detail-task="${esc(item.id)}">查看</button><button class="pin task-pin ${item.protected_session?'on':''}" data-pin-session="${esc(item.id)}" title="${item.protected_session?'取消任务保留':'永久保留此任务'}">${item.protected_session?'★':'☆'}</button>`:'<span></span><span></span>'}</div>`;
+  const secondary=item.match_excerpt?`命中${item.match_role==='instruction'?'任务指令':'任务结论'} · ${item.match_excerpt}`:`${taskLabel(item)} · ${item.name}`;
+  return`<div class="task-row ${checked?'selected':''}" data-task-row="${esc(item.path)}"><span class="branch-line"></span><input type="checkbox" data-task="${esc(item.path)}" ${checked?'checked':''} ${selectable?'':'disabled'}><span class="task-icon">${item.kind==='main'?'◆':'◇'}</span><button class="task-name task-title-button" data-detail-task="${esc(item.id||'')}"><b>${esc(taskTitle(item))}</b><span class="${item.match_excerpt?'match-excerpt':''}">${esc(secondary)}</span></button><span class="task-size">${item.logical_h}</span><span class="task-age">${age}</span><span class="task-state ${stateClass}">${state}</span>${item.id?`<button class="task-inspect" data-detail-task="${esc(item.id)}">查看</button><button class="pin task-pin ${item.protected_session?'on':''}" data-pin-session="${esc(item.id)}" title="${item.protected_session?'取消任务保留':'永久保留此任务'}">${item.protected_session?'★':'☆'}</button>`:'<span></span><span></span>'}</div>`;
 }
 function formatDate(value){if(!value)return'未知';const date=new Date(value);return Number.isNaN(date.getTime())?'未知':new Intl.DateTimeFormat('zh-CN',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}).format(date)}
 async function showTaskDetail(id){

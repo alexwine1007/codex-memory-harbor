@@ -37,4 +37,19 @@
 - On this Mac, a real scan cataloged 516 task records, imported four relevant external manifest records, and found two EP03 records by title. The attached Alex's Disk exposed persistent UUID `416F6307-4C31-3150-8734-75B3C9733EDB`.
 - A physical volume rename followed by automatic link repair has not yet been performed. The link-repair result above is unit-test evidence, not a claim that this destructive-environment scenario has been accepted on the user's drive.
 
+## Traceable recall and performance isolation, 2026-09-03
+
+- Memory Harbor 0.4.0-beta.1 passed 22 local unit tests, Python bytecode compilation, JavaScript syntax validation, Swift compilation, nested-helper code signing, and full app-bundle signature verification. Tests cover provenance, secret redaction, inherited-history and tool-output exclusion, idempotent indexing, offline recall, compact-summary privacy, and the rule that foreground recall cannot probe external storage or hash raw evidence.
+- Five currently linked child tasks were backfilled: four had trustworthy task boundaries and produced 11 compact outward-report fragments; one legacy child record remained metadata-only by design. Repeating the same build skipped all five unchanged sources, completed in 0.684 seconds, and reported no errors.
+- A real content query for `强约束` found `ep03 evidence audit`, identified the match as an outward task report, and retained the exact source line. With the external evidence path unavailable, the local-index test still returned the same provenance rather than silently reading another source.
+- The dashboard rendered the content match, automatically expanded its unclassified-task branch, displayed the evidence excerpt, and reported four content-recallable tasks. No browser-console error was observed.
+- After foreground queries were moved to strict read-only SQLite connections, the final 100-run gate measured 1.119 ms median and 1.528 ms p95. A real 516-session metadata scan measured 0.568 seconds. The local catalog was 6,389,760 bytes.
+- The installed 0.4 companion now uses a native Cocoa compact card. In the compact state,
+  `top` measured 0.0% CPU and about 26 MB memory, with no Python dashboard server and no
+  helper process running. Opening the dashboard launched a separately signed helper plus the
+  local server; returning it to the desktop terminated both processes, and the compact owner
+  remained at the saved desktop position. The installed helper still rendered the 516-item
+  tree and the EP03 content match before termination.
+- Keyword retrieval is only a deterministic traceability baseline. Automatic associative recall, semantic false-positive evaluation, and topic-change routing are not yet implemented and must not be described as shipped.
+
 Do not describe unverified cases as supported. Preserve rollback copies until the local machine passes its own restart and remount checks.

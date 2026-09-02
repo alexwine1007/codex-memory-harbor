@@ -4,7 +4,8 @@
 
 Codex Memory Harbor safely docks old Codex **child-task session logs** on a permanently attached external drive while preserving their original paths through verified symlinks.
 
-Version 0.3 adds a small rebuildable local catalog and a stable-volume identity layer.
+Version 0.4 adds a traceable local recall layer on top of the rebuildable catalog and
+stable-volume identity introduced in 0.3.
 External volumes work today,
 while cloud storage is deliberately shown as a future provider until verified local
 materialization, offline behavior, integrity checks, and credential handling exist.
@@ -60,6 +61,56 @@ the persistent volume UUID and the archived content hash both match.
 Storage-adaptive transfer optimization is on the roadmap, not claimed in this build.
 It will tune bounded concurrency, chunk size, checksum pipelining, and read caching from
 measured target latency and throughput while keeping the same durable safety gates.
+
+### Build and query the recall layer
+
+New offloads retain a small local evidence layer before the full JSONL moves. Existing
+docked child tasks can be backfilled while the drive is mounted:
+
+```bash
+python3 skills/codex-memory-harbor/scripts/harbor.py build-recall-index
+python3 skills/codex-memory-harbor/scripts/harbor.py recall "关键研发"
+python3 skills/codex-memory-harbor/scripts/harbor.py clear-recall-index
+```
+
+The recall layer stores only task-specific delegation instructions and child-task outward
+reports. It excludes inherited parent history, developer/system context, tool calls, tool
+output, and known secret-shaped values. Each fragment retains source task, source line,
+timestamp, role, and content hash. It is local plaintext metadata/evidence under
+`~/.codex/memory-harbor/catalog.sqlite3`; users can clear it independently of the archive.
+Retrieved text is untrusted historical evidence and must never be executed as instructions.
+Legacy child records without a trustworthy task-boundary marker remain metadata-only.
+
+See [recall architecture](docs/RECALL_ARCHITECTURE.md) for the research basis and staged
+roadmap.
+
+The current search box and `recall` command are a deterministic provenance test, not the
+finished interaction model. The next retrieval gate is automatic associative recall: new
+work should receive a bounded set of semantically related memory candidates even when its
+wording differs from the archived task. Semantic preparation must happen asynchronously;
+normal Codex work must never wait on a full archive scan or an external-drive read.
+
+### Performance contract
+
+Memory Harbor does not poll the filesystem or external disks. The macOS companion reacts to
+mount lifecycle events, ordinary scans are user-triggered, and recall queries use only the
+small internal SQLite index. Raw parsing happens during explicit backfill or offload, and
+unchanged content is skipped. No model, embedding runtime, or network request is present in
+the 0.4 foreground path.
+
+The desktop card is native Cocoa and keeps neither WebKit nor the Python dashboard server
+resident. Clicking `整理空间` launches an isolated detail helper; `放回桌面` terminates that
+helper and server so macOS can reclaim their complete working set.
+
+Run the repeatable local benchmark with:
+
+```bash
+python3 scripts/benchmark_performance.py --scan --query "强约束"
+```
+
+The target-Mac beta gate is local recall p95 under 25 ms and a 516-session metadata scan
+under 5 seconds. Idle CPU and direct app/server RSS are sampled separately because process
+metrics belong to the running macOS app rather than this command.
 
 ### Build the macOS app
 
