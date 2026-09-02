@@ -12,12 +12,25 @@ import unittest
 import urllib.request
 from unittest import mock
 
-SCRIPT = Path(__file__).parents[1] / "skills/codex-memory-harbor/scripts/harbor.py"
+REPO_ROOT = Path(__file__).parents[1]
+SCRIPT = REPO_ROOT / "skills/codex-memory-harbor/scripts/harbor.py"
 spec = importlib.util.spec_from_file_location("harbor", SCRIPT)
 harbor = importlib.util.module_from_spec(spec); spec.loader.exec_module(harbor)
 
 
 class HarborTests(unittest.TestCase):
+    def test_repository_policy_requires_commits_and_verification(self):
+        policy = (REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8")
+        self.assertIn("必须创建一个对应的 Git commit", policy)
+        self.assertIn("必须编写或更新相关测试", policy)
+        self.assertIn("确保所有测试和验证全部通过", policy)
+
+    def test_public_project_name_is_memory_harbor(self):
+        metadata = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+        readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertIn('name = "memory-harbor"', metadata)
+        self.assertEqual(readme.splitlines()[0], "# Memory Harbor")
+
     def fixture(self, root: Path, child=True, complete=True):
         path = root / "sessions/2026/01/01/rollout-test.jsonl"; path.parent.mkdir(parents=True)
         first = {"type":"session_meta","payload":{"id":"child-1","parent_thread_id":"parent-1" if child else None,"cwd":"/tmp/example"}}
