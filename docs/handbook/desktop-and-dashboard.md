@@ -1,76 +1,64 @@
-# Desktop and Dashboard
+# 桌面端与仪表盘
 
-- Status: Current implementation with documented design debt
-- Applies to: Memory Harbor 0.4.4-beta.1 on macOS
-- Last verified: 2026-09-03
+- 状态：当前实现，包含已记录的设计债务
+- 适用版本：Memory Harbor 0.4.4-beta.2（macOS）
+- 最后验证：2026-09-03
 
-## Purpose
+## 用途
 
-The desktop layer keeps a small, low-cost status card available while isolating the richer
-dashboard and its Python process. This chapter documents what exists today. The target
-experience is defined separately in the [Frontend Foundation](../design/FRONTEND_FOUNDATION.md).
+桌面层常驻一个低成本状态卡，把功能更完整的仪表盘及其 Python 进程隔离到按需启动的辅助应用中。本章只描述已经存在的实现；目标体验另见[前端设计基础](../design/FRONTEND_FOUNDATION.md)。
 
-## Process topology
+## 进程拓扑
 
 ```text
-Memory Harbor compact owner (native Cocoa, accessory app)
-    │ user opens details
+Memory Harbor 紧凑状态卡（原生 Cocoa，辅助应用）
+    │ 用户打开港口
     ▼
-Memory Harbor dashboard helper (native Cocoa, regular app)
-    │ starts and owns
+Memory Harbor 仪表盘辅助应用（原生 Cocoa，普通应用）
+    │ 启动并持有
     ▼
-harbor.py loopback server (127.0.0.1, ephemeral port)
-    │ serves
+harbor.py 本机回环服务（127.0.0.1，随机可用端口）
+    │ 提供页面与接口
     ▼
-static HTML/CSS/JavaScript inside WKWebView
+WKWebView 中的静态 HTML / CSS / JavaScript
 ```
 
-The compact owner remains alive but hides its window while the helper is open. Returning to
-the desktop terminates the helper; the helper-owned server observes its parent process and
-also exits. The compact owner then restores its saved desktop position and refreshes its
-summary.
+仪表盘打开时，紧凑状态卡的拥有者进程继续存活，但隐藏窗口。返回桌面后，仪表盘辅助应用退出；由它持有的服务监视父进程并随之退出。紧凑卡随后恢复原来的桌面位置并刷新摘要。
 
-The helper uses an ephemeral loopback port. No fixed port is part of the interface. The
-server prints its selected URL to the helper over stdout, and the helper waits for readiness
-before revealing WebKit.
+辅助应用使用随机可用的本机回环端口，接口不依赖固定端口。服务通过标准输出把实际 URL 交给辅助应用；辅助应用确认服务就绪后才显示 WebKit 页面。
 
-## Source map
+## 源码地图
 
-| Source | Responsibility |
+| 文件 | 职责 |
 | --- | --- |
-| `macos/CodexMemoryHarbor.swift` | compact owner window, mount/wake events, status process, helper lifecycle |
-| `macos/CodexMemoryHarborDashboard.swift` | dashboard window, server ownership, WKWebView, Codex deep links |
-| `skills/codex-memory-harbor/scripts/harbor.py` | scanning, catalog, recall, mutation routes, local server |
-| `skills/codex-memory-harbor/assets/dashboard/index.html` | dashboard document structure |
-| `skills/codex-memory-harbor/assets/dashboard/styles.css` | current dashboard presentation |
-| `skills/codex-memory-harbor/assets/dashboard/app.js` | current dashboard state, rendering, and actions |
-| `scripts/build_macos_app.sh` | app/helper bundles, resources, property lists, signing |
-| `scripts/install_macos.sh` | canonical install, legacy retirement, installed Skill, launch behavior |
+| `macos/CodexMemoryHarbor.swift` | 紧凑窗口、挂载与唤醒事件、状态进程、辅助应用生命周期 |
+| `macos/CodexMemoryHarborDashboard.swift` | 仪表盘窗口、服务所有权、WKWebView、Codex 深链接 |
+| `skills/codex-memory-harbor/scripts/harbor.py` | 扫描、目录、召回、状态变更接口与本地服务 |
+| `skills/codex-memory-harbor/assets/dashboard/index.html` | 当前仪表盘文档结构 |
+| `skills/codex-memory-harbor/assets/dashboard/styles.css` | 当前仪表盘样式 |
+| `skills/codex-memory-harbor/assets/dashboard/app.js` | 当前仪表盘状态、渲染与操作 |
+| `scripts/build_macos_app.sh` | 主应用与辅助应用打包、资源、属性表和签名 |
+| `scripts/install_macos.sh` | 正式安装、旧身份退役、Skill 同步与登录启动 |
 
-## Current compact-card contract
+## 当前紧凑状态卡合同
 
-The native card requests `compact-status`, which returns only summary values needed for the
-idle surface. It does not receive the task inventory or recall fragments. Mount, unmount,
-volume rename, and wake notifications trigger bounded refreshes; there is no repeating idle
-poll.
+原生状态卡调用 `compact-status`，只接收空闲界面需要的摘要值，不接收任务清单或召回片段。挂载、卸载、卷重命名和系统唤醒会触发有界刷新；空闲状态没有周期轮询。
 
-Current displayed information:
+当前首要信息已经从“能释放多少空间”改为“已停泊历史有多少当前可访问”：
 
-- service availability;
-- safely eligible capacity;
-- attached writable volume name and available capacity;
-- an action that opens the isolated dashboard helper.
+- 主数值：`当前可访问数 / 已停泊总数`；
+- 状态：连续性正常、连续性待恢复或状态暂不可用；
+- 次要提示：可安全停泊的历史数量与容量；
+- 存储设备名称、可用容量与连接状态；
+- “打开港口”进入隔离的仪表盘辅助应用。
 
-The card currently emphasizes reclaimable bytes. The target design changes its first
-question to continuity health and required attention.
+紧凑状态接口不执行停泊、释放或恢复，也不会读取历史正文。
 
-## Current dashboard transport
+## 当前仪表盘传输边界
 
-The server binds only to `127.0.0.1`. A per-process action token is returned by `/api/config`
-and required for mutation requests. The dashboard does not read browser credentials and the
-current foreground path makes no external network request.
+服务只绑定 `127.0.0.1`。`/api/config` 返回当前进程专用的操作令牌，所有会改变状态的请求必须携带该令牌。仪表盘不读取浏览器凭据，当前前台路径不发起外部网络请求。
 
-Read routes:
+读取接口：
 
 - `GET /api/config`
 - `GET /api/scan`
@@ -80,7 +68,7 @@ Read routes:
 - `GET /api/search`
 - `GET /api/recall`
 
-Action routes:
+操作接口：
 
 - `POST /api/settings`
 - `POST /api/protect`
@@ -96,55 +84,44 @@ Action routes:
 - `POST /api/finalize`
 - `POST /api/restore`
 
-Some POST routes are read-oriented but still require the action token. HTTP method alone is
-not a safety classification; the underlying operation contract is authoritative.
+部分 POST 接口本质上偏读取，但仍要求操作令牌。HTTP 方法不是安全等级，底层操作合同才是判断依据。
 
-## Current dashboard state
+## 当前前端状态
 
-`app.js` owns one global snapshot plus selection, recommendation, pin, expansion, search,
-filter, sort, and active-task state. It renders HTML strings and binds events after each
-render. This was adequate for the beta but is now a shallow frontend interface: transport,
-normalization, policy presentation, rendering, and operation orchestration are coupled.
+`app.js` 目前持有一个全局快照，以及选择、推荐、保护、展开、搜索、筛选、排序和活跃任务等状态。它通过 HTML 字符串渲染，并在每次渲染后重新绑定事件。这对 beta 阶段足够，但界面层仍然偏浅：传输、数据归一化、策略说明、渲染和操作编排耦合在一起。
 
-The redesign should deepen the frontend around the modules named in the Frontend Foundation
-without changing the backend safety contract as a side effect.
+后续改版应按“前端设计基础”中的模块切分，在不顺带改变后端安全合同的前提下加深界面结构。`docs/design/prototype/` 当前只是静态中文交互样板，不连接 `/api`，也不会触发真实历史操作。
 
-## Current lifecycle and failure behavior
+## 当前生命周期与失败行为
 
-- The helper hides WebKit until the local server has responded.
-- Startup failure closes the empty window, reports an error, and terminates the helper.
-- Unexpected server exit closes the helper rather than leaving a frozen dashboard.
-- The server watches the helper PID and stops when its owner exits.
-- Installation retires an exact-path orphan left by an older build.
-- The main compact owner uses accessory activation and stays out of the Dock.
-- The separately signed helper is the only visible Dock app while the dashboard is open.
+- 本地服务响应前，辅助应用隐藏 WebKit。
+- 启动失败会关闭空窗口、显示中文原因并退出辅助应用。
+- 服务意外退出时关闭辅助应用，不留下冻结仪表盘。
+- 服务监视辅助应用 PID，并在所有者退出后停止。
+- 安装脚本会清理由旧版本精确路径留下的孤儿进程。
+- 紧凑状态卡使用辅助应用激活策略，不常驻 Dock。
+- 只有单独签名的仪表盘辅助应用在打开时显示于 Dock。
 
-These statements are backed by the current test suite and the dated evidence ledger. They do
-not establish behavior on another Mac, another filesystem, or another Runtime Adapter.
+这些结论由当前测试和带日期的证据账本支撑，不自动外推到其他 Mac、文件系统或 Runtime Adapter。
 
-## Current design debt
+## 当前设计债务
 
-- the dashboard is Codex-specific in navigation, labels, and data assumptions;
-- all jobs share a single page and one global JavaScript state object;
-- style values are duplicated between Cocoa and CSS;
-- visual semantics are not encoded as shared tokens;
-- several controls rely on very small metadata text or text glyphs;
-- responsive CSS hides columns by child position;
-- frontend verification is dominated by static-string and backend-flow tests;
-- no screenshot fixture covers empty, healthy, offline, permission, integrity, or partial
-  failure states;
-- legacy widget assets remain in the Skill tree and need an ownership decision before the
-  redesign.
+- 仪表盘的导航、术语和数据假设仍偏 Codex；
+- 所有作业仍集中在单页和单个全局 JavaScript 状态对象中；
+- Cocoa 与 CSS 之间存在重复样式值；
+- 视觉语义尚未沉淀为共享 token；
+- 部分控件仍依赖过小的元信息文字或文字符号；
+- 响应式 CSS 仍按子元素位置隐藏列；
+- 前端验证仍以静态字符串与后端流程测试为主；
+- 尚无覆盖空状态、健康、离线、权限、完整性失败和部分失败的截图基线；
+- Skill 内仍有旧版 widget 资源，需要在正式改版前决定保留或退役。
 
-## Safe manual inspection
+## 安全人工检查
 
-1. Open the installed `Memory Harbor.app` and confirm the compact card appears without a
-   persistent helper or Python server.
-2. Open the dashboard and confirm one helper owns one ephemeral loopback server.
-3. Compare displayed summary counts with `harbor.py compact-status` and `harbor.py scan`.
-4. Inspect healthy, empty, and offline fixture states without invoking mutation routes.
-5. Use “return to desktop” and confirm both helper and server exit while the compact owner
-   remains.
+1. 打开已安装的 `Memory Harbor.app`，确认紧凑状态卡出现，且没有常驻辅助应用或 Python 服务。
+2. 点击“打开港口”，确认一个辅助应用只持有一个随机端口的本机回环服务。
+3. 将界面摘要与 `harbor.py compact-status`、`harbor.py scan` 的结果对照。
+4. 使用样例状态检查健康、空状态和离线界面，不调用任何变更接口。
+5. 返回桌面，确认辅助应用和服务退出，而紧凑状态卡继续存在。
 
-Real docking, release, restore, unplug, and permission-denial checks are separate acceptance
-procedures. Do not use live history merely to inspect layout.
+真实停泊、释放、恢复、拔盘和权限拒绝属于独立验收流程。不要为了检查版式而操作真实历史。

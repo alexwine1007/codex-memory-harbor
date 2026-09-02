@@ -1,9 +1,9 @@
 interface:
   display_name: "Memory Harbor"
-  short_description: "Dock old Codex child-task logs safely"
+  short_description: "安全停泊并找回 Codex 历史证据"
   icon_small: "./assets/icon-small.svg"
   icon_large: "./assets/icon-large.svg"
   brand_color: "#7C6CFF"
-  default_prompt: "Use $codex-memory-harbor to open the dashboard and safely inspect Codex session storage."
+  default_prompt: "使用 $codex-memory-harbor 打开中文仪表盘，安全检查 Codex 历史存储与连续性状态。"
 policy:
   allow_implicit_invocation: true

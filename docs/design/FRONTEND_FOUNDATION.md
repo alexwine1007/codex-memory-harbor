@@ -1,428 +1,365 @@
-# Memory Harbor Frontend Foundation
+# Memory Harbor｜前端设计基础
 
-- Status: Draft 0.1
-- Date: 2026-09-03
-- Applies to: macOS compact card, dashboard, and future runtime/storage adapter surfaces
-- Implementation status: target design; not shipped unless a section says otherwise
+- 状态：草案 0.2
+- 更新：2026-09-03
+- 适用范围：macOS 桌面卡片、完整仪表盘，以及未来的 Runtime / Storage Adapter 界面
+- 实现状态：目标设计；除明确标注外，不代表已经上线
+- 可运行原型：[打开中文 AI 科幻交互原型](prototype/index.html)
 
-## Product role
+## 产品角色
 
-The interface exists to make continuity trustworthy and understandable. It is not a disk
-cleaner with a decorative dashboard. At every point it should answer three questions:
+Memory Harbor 的界面不是磁盘清理器的装饰面板，而是个人智能工作历史的连续性驾驶舱。任何页面都应优先回答：
 
-1. Is my work history safe and accessible?
-2. Does anything need my attention?
-3. What will happen before I authorize a state-changing action?
+1. 我的历史现在是否完整、可发现、可访问？
+2. 是否有风险或事项需要我处理？
+3. 在我授权改变数据状态前，系统将做什么、如何验证、如何恢复？
 
-The visual hierarchy is therefore:
+视觉信息层级固定为：
 
 ```text
-continuity health > required attention > evidence > available action > capacity savings
+连续性健康 > 待处理风险 > 验证证据 > 可执行动作 > 可释放空间
 ```
 
-Saved bytes are useful, but they are never more prominent than integrity or accessibility.
+容量是结果，不是产品的第一价值。
 
-## Current-state assessment
+## 用户确认的设计方向
 
-The 0.4.4 beta has a coherent dark MVP rather than a complete product design. It already
-provides a native compact card, a WebKit dashboard, storage selection, summary cards, a
-project/task tree, search, protected-item controls, migration confirmation, progress,
-audit, restore, and local-backup release.
+整体采用具有强吸引力的 **AI 科幻感**，让用户第一眼感受到这是一套正在运行的智能历史基础设施，而不是传统文件管理器。
 
-The main design debt is structural:
+科幻感来自：
 
-- the dashboard still presents Memory Harbor as Codex storage optimization;
-- browse, recall, docking, integrity, recovery, and connection management share one page;
-- `0.0 B` remains the hero even when the more meaningful state is “all docked history is
-  currently accessible”;
-- `整理`, `优化`, `迁移`, `停泊`, and `释放` overlap without one action vocabulary;
-- compact Cocoa and dashboard CSS repeat visual decisions without a shared specification;
-- the frontend is one global-state JavaScript file and one compressed stylesheet;
-- narrow layouts silently hide data columns rather than providing a deliberate compact row;
-- 9–11 px labels, glyph icons, and weak focus treatment do not meet the target accessibility
-  standard;
-- there are no state-fixture screenshots, keyboard-flow tests, or visual regression gates.
+- 像智能核心一样可感知的连续性状态；
+- Runtime、存储、证据和历史对象之间清晰的数据连接；
+- 深空层次、能量轨道、扫描与信号反馈；
+- 对真实运行阶段有意义的微动效；
+- 命令面板、智能召回和能力矩阵带来的 Agent 原生感。
 
-## Experience principles
+科幻感不能来自：
 
-### Proof before reassurance
+- 牺牲可读性的过量霓虹；
+- 与真实进度无关的假动画；
+- 用炫光隐藏错误、风险和未验证边界；
+- 将危险操作游戏化；
+- 把“在线”包装成“所有连续性能力都可用”。
 
-Do not display “safe”, “healthy”, or “complete” without a nearby scope and last-verification
-time. A receipt or inspection path must be available for consequential claims.
+设计主题命名为 **深空智能港**：深色宇宙背景、量子青、智能紫和验证绿形成品牌识别；证据、状态和路径构成视觉叙事。
 
-### One primary decision per view
+## 语言规则
 
-A page can expose secondary inspection actions, but it has one visually dominant next step.
-Destructive or irreversible actions are never visually paired with routine navigation.
+- 用户界面、产品文档、技术手册入口和 Skill 默认使用简体中文；
+- `Runtime`、`Adapter`、`SHA-256`、`fsync` 等无法无损替代的技术词可以保留英文，但首次出现时必须用中文解释；
+- 不向用户直接暴露内部异常英文；底层错误必须归一化成中文信息和稳定错误码；
+- 代码标识、协议字段和命令名称可以保持英文，用户可见说明必须是中文；
+- 不用“优化”代替真实状态转换，不用“成功”代替已完成的具体验证。
 
-### Issues first, storage second
+## 当前界面判断
 
-When everything is healthy, the interface may summarize capacity. When any continuity issue
-exists, the issue becomes the hero and capacity moves down the hierarchy.
+0.4.4 beta 已经有一套可用的深色 MVP：原生桌面卡片、WebKit 仪表盘、存储选择、概览卡片、项目树、搜索、保护控制、迁移确认、进度、审计、恢复和本地副本释放都已存在。
 
-### Capabilities, not vendor promises
+当前主要问题不是配色，而是结构：
 
-Each Runtime Adapter and Storage Adapter shows the capabilities it has actually passed.
-Unsupported native open or resume behavior is explicit, not hidden behind a generic online
-badge.
+- 产品仍被呈现为 Codex 存储清理工具；
+- 浏览、召回、停泊、完整性、恢复和连接管理挤在同一页；
+- 没有待整理对象时，`0.0 B` 仍占据最大视觉位置；
+- `整理、优化、迁移、停泊、释放` 缺少唯一含义；
+- Cocoa 卡片和 Web 仪表盘没有共享设计规范；
+- 前端状态、请求、策略表达和渲染集中在一个 JavaScript 文件；
+- 窄窗口通过隐藏列处理，缺少真正的紧凑信息结构；
+- 小字号、字符图标和焦点反馈尚未达到目标无障碍标准；
+- 没有状态夹具截图、键盘路径和视觉回归门槛。
 
-### Calm infrastructure
+## 体验原则
 
-The product should feel quiet, durable, and precise. Retain the current violet/teal identity,
-but reduce decorative glow and glass effects. The harbor metaphor informs language and
-structure; it should not become nautical ornament.
+### 证据先于安慰
 
-### Progressive disclosure
+显示“安全、健康、完成”时必须同时说明验证范围与时间，并允许进入证据回执。
 
-Default views show health, identity, scope, and the next decision. Hashes, paths, adapter
-versions, stage timings, and raw receipts remain one inspection step away.
+### 一页一个主要决策
 
-## Information architecture
+每个页面只能有一个视觉上最突出的下一步。不可逆动作不与普通导航并列竞争。
 
-The dashboard becomes a stable application shell rather than one long operations page.
+### 风险优先，容量其次
+
+全部正常时可以展示容量；任何连续性异常出现时，异常必须接管首屏中心。
+
+### 展示能力，不做厂商联想
+
+Runtime 和 Storage Adapter 只展示已经验收的能力。C1 证据可读不能装成 C3 可继续工作。
+
+### 渐进披露
+
+默认展示身份、健康、范围和下一步；哈希、路径、Adapter 版本、阶段耗时与原始回执进入一层详情。
+
+### 有意义的动效
+
+轨道、扫描、光流和脉冲只表达连接、验证、传输或等待。系统空闲时不持续占用资源制造氛围。
+
+## 信息架构
 
 ```text
 Memory Harbor
-├── Overview          continuity health and attention
-├── History           cross-runtime discovery and recall
-├── Docking           candidates, plans, active transfers
-├── Integrity         audits, faults, and recovery
-├── Connections       runtime and storage adapters
-├── Activity          receipts and lifecycle events
-└── Settings          retention, privacy, and local behavior
+├── 港口总览        连续性健康与待处理事项
+├── 历史星图        跨 Runtime 发现、召回与证据阅读
+├── 停泊队列        候选对象、方案与传输阶段
+├── 完整性核心      审计、故障和恢复
+├── 连接矩阵        Runtime 与 Storage Adapter 能力
+├── 证据回执        生命周期事件与可审计证明
+└── 系统设置        保留策略、隐私与本地行为
 ```
 
-Global shell:
+应用壳采用左侧导航、顶部全局状态和主内容区：
 
 ```text
-┌──────────────┬───────────────────────────────────────────────────────┐
-│ Memory Harbor│ Page title                         Global health       │
-│              ├───────────────────────────────────────────────────────┤
-│ Overview     │                                                       │
-│ History      │                    Page content                       │
-│ Docking      │                                                       │
-│ Integrity    │                                                       │
-│ Connections │                                                       │
-│ Activity     │                                                       │
-│ Settings     ├───────────────────────────────────────────────────────┤
-│              │ Contextual selection/action bar, only when required  │
-└──────────────┴───────────────────────────────────────────────────────┘
+┌──────────────┬──────────────────────────────────────────────┐
+│ Memory Harbor│ 页面标题                  全局连续性状态     │
+│              ├──────────────────────────────────────────────┤
+│ 港口总览     │                                              │
+│ 历史星图     │                 当前页面                     │
+│ 停泊队列     │                                              │
+│ 完整性核心   │                                              │
+│ 连接矩阵     ├──────────────────────────────────────────────┤
+│ 证据回执     │ 仅在需要时出现的选择/操作栏                  │
+└──────────────┴──────────────────────────────────────────────┘
 ```
 
-The global health control opens a small status panel with Runtime, storage, index, and
-last-audit state. It is not also used as the storage picker.
+顶部全局状态展开后显示 Runtime、存储、索引和最近审计状态。它不再同时承担存储选择器。
 
-## Page contracts
+## 页面合同
 
-### Overview
+### 港口总览
 
-Primary question: “Can I trust and reach my history right now?”
+核心问题：我的历史此刻是否可信且可访问？
 
-Required regions:
+- 连续性核心：正常、需关注、工作中或不可判断；
+- 已验证范围：可访问对象 / 已停泊对象及最后验证时间；
+- 按数据风险排序的待处理事项；
+- Runtime 与存储连接摘要；
+- 内盘占用、冷存储容量、本地副本等容量信息；
+- 最近证据回执。
 
-- continuity hero: healthy, attention required, working, or unavailable;
-- verified scope: accessible objects / docked objects and last verification time;
-- issues requiring action, ordered by data risk;
-- Runtime and storage connection summary;
-- capacity summary, including internal occupancy and retained local copies;
-- recent evidence receipts.
+没有可停泊对象时显示“港口健康”，不让 `0.0 B` 成为视觉中心。
 
-When no object is eligible for docking, the hero says the harbor is healthy. It does not
-make `0.0 B` the largest object on screen.
+### 历史星图
 
-### History
+核心问题：我要找的工作在哪里，现在能对它做什么？
 
-Primary question: “Where is the work I need, and what can I do with it?”
+- 搜索主题、标题、项目、Runtime 身份、任务身份和时间；
+- 按 Runtime、项目、连续性等级、位置、保护和故障筛选；
+- 结果显示来源 Runtime、证据时间、存储状态和能力等级；
+- 详情区分摘要、召回线索、出处、完整性与 Runtime 动作；
+- 外盘离线时仍可发现，读取原始证据时明确需要哪一个介质。
 
-- search accepts topic, title, project, runtime identity, task identity, and date;
-- filters include Runtime, project, continuity capability, location, protection, and fault;
-- result rows expose identity, source Runtime, latest evidence time, storage state, and
-  verified capability level;
-- the detail drawer separates summary, recall leads, provenance, integrity, and available
-  Runtime actions;
-- an offline source remains discoverable; opening raw evidence explains which storage is
-  required.
+### 停泊队列
 
-### Docking
+核心问题：哪些历史可以安全离开活跃存储，系统将逐步做什么？
 
-Primary question: “What can safely leave active storage, and exactly what will happen?”
+- 按 Runtime 与项目组织候选对象；
+- 每个排除项解释保护原因；
+- 方案阶段只读，展示目标、容量、安全阶段、预计耗时、资源策略和本地副本选择；
+- 进度必须显示当前安全阶段，而非只有百分比；
+- 首个错误停止批次，并区分已完成、可恢复和未触碰对象；
+- 完成后可以逐对象打开证据回执。
 
-- candidates are grouped by Runtime and project;
-- every exclusion explains why the object is protected;
-- planning is read-only and displays destination, byte count, required stages, estimated
-  duration, resource policy, and local-copy choice;
-- execution progress names the current safety stage rather than showing an unexplained
-  percentage;
-- the completion view links to per-object evidence receipts;
-- a first error stops the batch and distinguishes completed, recoverable, and untouched
-  objects.
+### 完整性核心
 
-### Integrity
+核心问题：哪里发生了降级，原因是什么，最安全的恢复路径是什么？
 
-Primary question: “What is degraded, why, and what is the safest recovery?”
+- 风险对象排在健康对象之前；
+- 区分介质未挂载、挂载路径改变、权限拒绝、完整性失败、Adapter 不兼容和原生打开失败；
+- 只有身份与哈希合同全部匹配时才允许自动修复；
+- 批量审计必须有界、可取消并展示范围。
 
-- issues precede healthy objects;
-- media absent, mount changed, permission denied, integrity failed, adapter incompatible,
-  and native-open failure are distinct states;
-- automatic repair is offered only when its complete identity and hash contract is met;
-- manual recovery explains required media, expected effect, and rollback before acting;
-- bulk audit is a named, cancellable operation with bounded scope.
+### 连接矩阵
 
-### Connections
+核心问题：连接了哪些 Runtime 与存储，它们分别能做什么？
 
-Primary question: “Which Runtimes and storage targets are connected, and what can each do?”
+Runtime 卡片显示 Adapter 名称与版本、历史数量、最后扫描时间和 C0–C3 能力。存储卡片显示提供方、稳定身份、在线状态、容量、持久化能力、文件系统或物化模式及最近探针。
 
-Runtime cards show adapter name/version, discovered-object count, last successful scan, and
-verified C0–C3 capability matrix. Storage cards show provider, identity, online state,
-capacity, durability capability, filesystem/materialization mode, and latest probe.
+“已连接”绝不等于“所有能力可用”。
 
-“Connected” never means “all capabilities supported”.
+### 证据回执
 
-### Activity
+核心问题：什么发生了变化，证据在哪里？
 
-Primary question: “What changed, and what proves it?”
+回执按操作、对象、Adapter、结果和时间筛选。默认显示人类可读结果；展开后显示哈希、路径、阶段耗时、版本和错误，但不暴露凭据或无关对话正文。
 
-Receipts are append-oriented and filterable by operation, object, adapter, result, and time.
-The default row shows human-readable outcome and scope; expanded evidence shows hashes,
-paths, stage timings, versions, and error details without exposing credentials or unrelated
-history text.
+### 系统设置
 
-### Settings
+包含保留策略、受保护对象、索引清除、启动方式、资源预算和隐私控制。凭据交给系统或提供方授权流程，不在界面回显。
 
-Settings cover retention policy, protected projects/objects, index clearing, startup
-behavior, resource budget, and privacy controls. Dangerous settings state their effect on
-continuity. Credential material is delegated to supported system or provider authorization
-flows and never displayed back.
+## 桌面卡片
 
-## Compact card
-
-The card is an ambient status surface, not a miniature dashboard.
+桌面卡片是环境状态，不是微型仪表盘：
 
 ```text
-┌────────────────────────────────────┐
-│  Memory Harbor          Healthy ●  │
-│                                    │
-│  All docked history is accessible  │
-│  194 / 194 verified                │
-│                                    │
-│  Alex's Disk · online    Open ›    │
-└────────────────────────────────────┘
+┌──────────────────────────────────┐
+│ Memory Harbor         正常 ●     │
+│                                  │
+│ 所有停泊历史均可访问             │
+│ 194 / 194 已验证                  │
+│                                  │
+│ Alex’s Disk · 在线      打开 ›   │
+└──────────────────────────────────┘
 ```
 
-The count is illustrative, not hard-coded product copy.
+数字仅为原型示例，不得写死。
 
-Card modes:
-
-| Mode | Primary message | Secondary evidence | Action |
+| 模式 | 主信息 | 次级证据 | 操作 |
 | --- | --- | --- | --- |
-| Healthy | All declared continuity checks pass | accessible / docked, last checked | Open Harbor |
-| Opportunity | Safe docking candidates are available | objects and reclaimable capacity | Review plan |
-| Working | Docking or audit is active | named stage and progress | Open progress |
-| Attention | A recoverable issue needs action | affected objects and risk | Review issue |
-| Unavailable | Status cannot be established | Runtime/storage reason | Diagnose |
+| 正常 | 所有已声明连续性检查通过 | 可访问 / 已停泊、最后检查 | 打开港口 |
+| 有机会 | 出现可安全停泊的候选 | 对象数与可释放容量 | 查看方案 |
+| 工作中 | 停泊或审计正在执行 | 阶段与真实进度 | 打开进度 |
+| 需关注 | 存在可恢复异常 | 影响范围与风险 | 查看问题 |
+| 不可判断 | 当前无法建立状态 | Runtime / 存储原因 | 开始诊断 |
 
-The card never offers one-click destructive work. It opens the relevant dashboard page.
+卡片不直接执行破坏性动作。
 
-## State model
-
-### History lifecycle
+## 状态模型
 
 ```text
-Active / Protected / Eligible
-              │ plan
-              ▼
-           Planned
-              │ stage + persist + verify
-              ▼
-   Verified external candidate
-              │ preserve Runtime continuity
-              ▼
- Independently verified docking
-       ┌──────┴────────┐
-       ▼               ▼
-Docked with       Docked external
-local copy        primary
-       └──────┬────────┘
-              │ restore
-              ▼
-          Local again
+活跃 / 受保护 / 可停泊
+          │ 生成方案
+          ▼
+        已规划
+          │ 暂存 + 持久化 + 校验
+          ▼
+    外部候选已验证
+          │ Runtime 连续性接管
+          ▼
+     独立复核已通过
+      ┌───┴──────────┐
+      ▼              ▼
+停泊并保留       外部主实体
+本地副本         已完成停泊
+      └─────┬────────┘
+            │ 恢复
+            ▼
+         回到本机
 ```
 
-The UI receives a lifecycle state and available actions from the core. It does not infer
-safety from button history or HTTP success alone.
+前端接收核心输出的生命周期状态和可用动作，不从按钮点击历史或单次 HTTP 成功自行推断安全。
 
-### Fault vocabulary
-
-| State | Meaning | Default UI treatment |
+| 状态码 | 含义 | 默认表现 |
 | --- | --- | --- |
-| `storage_unmounted` | known storage identity is absent | amber, reconnect instructions |
-| `mount_changed` | identity matches but native path changed | amber, offer verified repair |
-| `permission_denied` | object exists but access is refused | amber, explain system permission |
-| `integrity_failed` | required size/hash evidence disagrees | red, block release and restore |
-| `runtime_unavailable` | Runtime cannot currently inspect/open | amber, retain evidence state |
-| `adapter_incompatible` | adapter/runtime version contract failed | red, block mutation |
-| `native_open_failed` | evidence is present but Runtime open failed | amber, distinguish from data loss |
+| `storage_unmounted` | 已知存储介质不在 | 琥珀色，给出重新连接路径 |
+| `mount_changed` | 身份匹配但路径改变 | 琥珀色，仅在完整验证后允许修复 |
+| `permission_denied` | 实体存在但没有权限 | 琥珀色，解释系统授权 |
+| `integrity_failed` | 长度或哈希证据不一致 | 红色，阻止释放与覆盖 |
+| `runtime_unavailable` | Runtime 暂时无法检查或打开 | 琥珀色，保留证据状态 |
+| `adapter_incompatible` | Adapter 与 Runtime 版本不兼容 | 红色，阻止改变数据 |
+| `native_open_failed` | 证据存在但原生打开失败 | 琥珀色，明确不等于数据丢失 |
 
-Color supplements text and iconography; it never carries the state alone.
+状态不能只用颜色表达。
 
-## Action language
+## 操作语言
 
-Canonical actions:
-
-| Action | Meaning |
+| 中文动作 | 唯一含义 |
 | --- | --- |
-| Review docking plan | create a read-only plan for selected objects |
-| Dock | perform the verified transition to cold storage |
-| Keep local copy | retain the rollback entity after docking |
-| Release local copy | permanently remove a separately retained local entity after audit |
-| Verify integrity | compare the evidence required by the applicable contract |
-| Restore locally | return to an ordinary local Runtime-readable entity |
-| Open in Runtime | use the Runtime's declared native-open capability |
-| Read evidence | inspect preserved source evidence without implying resumability |
+| 查看停泊方案 | 为选中对象生成只读方案 |
+| 停泊 | 执行到冷存储的验证式状态转换 |
+| 保留本地副本 | 停泊完成后仍保存回滚实体 |
+| 释放本地副本 | 审计通过后永久删除单独保留的本地实体 |
+| 验证完整性 | 按对应合同重新检查证据 |
+| 恢复到本机 | 重新成为 Runtime 可读的本地普通实体 |
+| 在 Runtime 中打开 | 使用 Adapter 已声明的原生打开能力 |
+| 读取证据 | 查看保存的来源，不暗示可以继续工作 |
 
-Avoid `一键优化`: it hides the state transition and makes a safety-critical operation sound
-like routine cleanup. Chinese product copy should use `查看停泊方案`, `停泊`, `保留本地副本`,
-`释放本地副本`, `验证完整性`, and `恢复到本机` consistently.
+正式界面不再使用“一键优化”，因为它掩盖了安全状态转换。
 
-## Harbor UI visual system
+## 深空智能港视觉系统
 
-### Personality
+### 色彩角色
 
-Quiet, dependable, local, and inspectable. Avoid cyberpunk storage imagery, excessive neon,
-and gamified “cleanup scores”. Use generous dark space, crisp boundaries, and restrained
-depth to communicate durable infrastructure.
+| Token | 建议值 | 用途 |
+| --- | --- | --- |
+| `surface.void` | `#04050A` | 深空底色 |
+| `surface.space` | `#080A14` | 应用背景 |
+| `surface.raised` | `#101428` | 卡片、抽屉与浮层 |
+| `accent.quantum` | `#43DCFF` | 数据连接、扫描和当前焦点 |
+| `accent.intelligence` | `#8F6CFF` | AI 身份与主要动作 |
+| `status.verified` | `#45EFBD` | 仅用于已验证健康状态 |
+| `status.attention` | `#FFBA69` | 可恢复降级 |
+| `status.danger` | `#FF668A` | 完整性风险与不可逆动作 |
+| `text.primary` | `#F4F7FF` | 标题和关键数值 |
+| `text.secondary` | `#8D98B5` | 满足 AA 对比度的说明文字 |
 
-### Color roles
+### 字体与空间
 
-| Token | Target role |
-| --- | --- |
-| `surface.canvas` | neutral near-black application background |
-| `surface.raised` | primary cards and drawers |
-| `surface.selected` | selected history rows and navigation |
-| `accent.primary` | violet identity and ordinary primary action |
-| `accent.secondary` | teal verification and active connection |
-| `status.healthy` | verified healthy state only |
-| `status.attention` | degraded but recoverable state |
-| `status.danger` | integrity risk or irreversible action |
-| `text.primary` | high-contrast title and values |
-| `text.secondary` | explanatory copy, never below AA contrast |
+- 正文 14 / 20 px；元数据不得低于 12 / 16 px；
+- 页面标题 24–28 px；核心指标通常为 36–48 px；
+- 数值与哈希可使用等宽字体；中文正文保持系统字体；
+- 间距序列：4、8、12、16、24、32、48；
+- 交互热区至少 32 × 32 px，主要动作优先 40 px；
+- 不通过缩小字号制造“专业感”。
 
-Exact color values are chosen during visual exploration and recorded as shared tokens for
-Cocoa and CSS. Semantic states must not reuse decorative accent colors arbitrarily.
+### 形状、光效与动效
 
-### Type and spacing
+- 控件圆角 8–12 px，主要容器 14–18 px；
+- 量子青和智能紫光效只标记活动连接、选中与计算核心；
+- 玻璃层用于应用壳、抽屉和命令面板，不让所有卡片都漂浮；
+- 页面过渡 160–240 ms，状态微动效 800–4000 ms；
+- 系统空闲时停止高频动画，遵守“减少动态效果”；
+- 进度动画必须绑定真实阶段，暂停或失败后立即停止。
 
-- base body: 14 px / 20 px;
-- secondary metadata: minimum 12 px / 16 px;
-- compact-card status: minimum 13 px;
-- page title: 24–28 px; overview metric: 36–48 px, not 68 px by default;
-- spacing scale: 4, 8, 12, 16, 24, 32, 48;
-- interactive target: at least 32 × 32 px, with 40 px preferred for primary actions;
-- table/list density may be compact, but never by dropping below the minimum metadata size.
+## 前端深模块
 
-### Shape and depth
+- `HarborClient`：本地传输、令牌、错误中文化、取消和响应版本检查；
+- `HarborStore`：保存唯一规范化快照和显式状态转换；
+- `CapabilityPresenter`：把 Adapter 证据映射为统一 C0–C3 语言；
+- `OperationPresenter`：把方案、阶段、故障与回执转换为界面状态；
+- `HistoryExplorer`：查询、筛选、层级、选择与详情；
+- `StatusSurface`：总览与 Cocoa 卡片共享的状态语义。
 
-- use 8–12 px radii for controls and 14–18 px for major surfaces;
-- reserve the 24–28 px radius for the compact card or a single hero surface;
-- prefer solid layered surfaces over pervasive transparency;
-- shadows communicate window or drawer elevation, not every card boundary.
+Cocoa 与 Web 不必共享渲染代码，但必须共享状态名、中文文案、语义色、图标含义和验收夹具。
 
-### Motion
+不为了目录结构引入前端框架。只有当可测试性、无障碍或状态复杂度证明收益时才增加依赖。
 
-- 120–200 ms for state transitions;
-- progress reflects real stage changes;
-- no looping animation while idle;
-- honor reduced-motion settings;
-- a failed or paused operation does not continue visually advancing.
+## 无障碍与本地化门槛
 
-## Reusable interface modules
+- 所有流程可以只用键盘完成；
+- 所有表面都有清晰焦点；
+- 状态不只依赖颜色；
+- 正文和状态满足 WCAG AA；
+- 200% 缩放后不隐藏必要动作和证据；
+- 支持系统减少动态效果；
+- 中文是首个完整语言；重构时把文案移入本地化字典；
+- 底层异常通过稳定错误码映射成中文，不直接把英文异常抛给用户。
 
-The target frontend should concentrate complexity behind a small set of modules:
+## 验证策略
 
-- `HarborClient`: authenticated localhost transport, error normalization, cancellation, and
-  response-version checks;
-- `HarborStore`: one normalized application snapshot and explicit transitions;
-- `CapabilityPresenter`: maps adapter capability evidence to consistent C0–C3 language;
-- `OperationPresenter`: maps plans, progress stages, failures, and receipts to UI state;
-- `HistoryExplorer`: query, filters, selection, hierarchy, and detail drawer;
-- `StatusSurface`: shared semantic presentation contract for overview and compact Cocoa.
+1. 为正常、空、可停泊、工作中、介质离线、权限拒绝、完整性失败、批次部分失败和 Adapter 不兼容建立确定性夹具；
+2. 从夹具渲染全部页面和桌面卡片状态；
+3. 在标准与最小窗口尺寸生成截图基线；
+4. 增加键盘、焦点、对比度和减少动效测试；
+5. 只读接入真实接口，并把显示数字与 CLI 结果对照；
+6. 用合成数据接入方案生成；
+7. 只有持久化停泊模块通过故障注入后，才连接真实改变数据的动作。
 
-The Cocoa card and Web dashboard do not need to share rendering code. They must share state
-names, copy, semantic color roles, icon meanings, and acceptance fixtures.
+## 交付阶段
 
-Suggested dependency-free source shape:
+### F0｜设计基础
 
-```text
-dashboard/
-├── index.html
-├── app.js                 composition only
-├── client/harbor-client.js
-├── state/harbor-store.js
-├── presenters/
-├── views/
-├── components/
-├── styles/tokens.css
-├── styles/base.css
-├── styles/components.css
-└── fixtures/
-```
+确认信息架构、中文动作语言、桌面卡片层级和“深空智能港”视觉方向。当前中文交互原型属于这一阶段。
 
-Do not introduce a framework merely to obtain folders. Adopt one only if measured interface
-complexity, accessibility, or testability justifies its resident and build costs.
+### F1｜应用壳与只读页面
 
-## Accessibility and localization gates
+实现共享 Token、应用壳、港口总览、历史星图、连接矩阵与全部夹具状态，不改变真实迁移行为。
 
-- all workflows are keyboard-complete, including tree navigation and dialogs;
-- focus is visible against every surface;
-- controls have names that describe actions rather than icon appearance;
-- text and status contrast meet WCAG AA;
-- status is never color-only;
-- zoom at 200% retains every required action and does not silently hide evidence;
-- reduced motion is respected;
-- Chinese is the first complete locale, but interface copy moves to localization keys during
-  the refactor so Runtime and storage terminology can be translated consistently.
+### F2｜安全操作体验
 
-## Verification strategy
+持久化安全门通过后，实现停泊、完整性、阶段进度、故障恢复和证据回执。
 
-Before connecting redesigned mutation controls to real history:
+### F3｜多 Runtime 验证
 
-1. Build deterministic fixtures for healthy, empty, eligible, working, offline, permission
-   denied, integrity failed, partial batch failure, and adapter-incompatible states.
-2. Render Overview, History, Docking, Integrity, and compact-card variants from fixtures.
-3. Add screenshot baselines at standard and minimum window sizes.
-4. Add keyboard and dialog-focus tests.
-5. Connect read-only live endpoints and verify displayed counts against CLI output.
-6. Connect planning to synthetic data.
-7. Connect mutation only after the durable docking module and its fault-injection gate pass.
+展示 Codex 能力矩阵，加入第二个真实 Runtime Adapter，证明主要页面不需要厂商特例。
 
-## Delivery slices
+## F0 验收
 
-### F0 — foundation
-
-Approve this information architecture, action vocabulary, compact-card hierarchy, and visual
-personality. Produce low-fidelity layouts before production styling.
-
-### F1 — shell and read-only views
-
-Implement shared tokens, application shell, Overview, History, Connections, and fixture
-states. No real mutation behavior changes.
-
-### F2 — durable operation experience
-
-After the core durability gate passes, implement Docking, Integrity, progress stages,
-failure recovery, and evidence-receipt inspection against synthetic fixtures, then live data.
-
-### F3 — multi-runtime proof
-
-Display the Codex adapter capability matrix, add the second real Runtime Adapter, and verify
-that the shell, History, Integrity, and Activity views need no vendor-specific forks.
-
-## F0 acceptance checklist
-
-- every primary user question has one owning page;
-- compact card communicates health before reclaimable bytes;
-- no consequential state is represented by one generic “online” badge;
-- action language distinguishes plan, dock, verify, release, restore, open, and read;
-- every target page has healthy, empty, working, degraded, and error behavior;
-- the design is Runtime-neutral while current Codex-only delivery remains explicit;
-- implementation and screenshot testing can proceed without real user-history mutations.
+- 第一眼具有明确的 AI 科幻识别度，同时文字和安全动作仍清楚；
+- 每个核心用户问题只有一个所属页面；
+- 桌面卡片先表达健康，再表达空间；
+- 不使用一个“在线”徽标概括所有能力；
+- 中文动作严格区分方案、停泊、校验、释放、恢复、打开和读取；
+- 每个页面都有正常、空、工作中、降级和错误设计；
+- 当前 Codex-only 交付边界仍然清楚；
+- 原型和截图验证不触碰真实用户历史。

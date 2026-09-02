@@ -1,46 +1,46 @@
-# ADR 0001: Keep the Harbor core runtime-neutral
+# ADR 0001：保持 Harbor 核心与运行时中立
 
-- Status: Accepted
-- Date: 2026-09-03
+- 状态：已接受
+- 日期：2026-09-03
 
-## Context
+## 背景
 
-The first working Memory Harbor implementation understands Codex session JSONL, task identity, local paths, and symlink-based continuity. The product direction is broader: preserve trustworthy, discoverable, accessible, and resumable work history across agent runtimes and harnesses such as Codex, Claude Code, and OpenClaw, as well as clients built around model providers such as DeepSeek.
+Memory Harbor 的第一套可运行实现理解 Codex 的会话 JSONL、任务身份、本地路径与基于符号链接的连续性。产品方向则更广：在 Codex、Claude Code、OpenClaw 等 Agent Runtime 与 Harness，以及围绕 DeepSeek 等模型供应商构建的具体客户端中，保存可信、可发现、可访问且可继续的工作历史。
 
-Those systems do not share one history format, liveness signal, identity scheme, or native resume contract. Embedding Codex assumptions in the core would make later integrations either unsafe or cosmetic. Reducing every system to exported files would be portable, but would discard native continuity and confuse evidence readability with resumability.
+这些系统并不共享同一种历史格式、活跃性信号、身份机制或原生续接合同。若把 Codex 假设写进核心，未来集成只能变得不安全或流于表面。把所有系统都降格成文件导出虽然可移植，却会丢失原生连续性，并把“证据可读”误当成“可以继续工作”。
 
-## Decision
+## 决策
 
-Memory Harbor will have a runtime-neutral core with two explicit seams:
+Memory Harbor 采用运行时中立核心，并建立两条明确边界：
 
-1. A Runtime Adapter maps native history identity, discovery, liveness, protection, evidence membership, open, and resume capabilities into the Harbor history-object contract.
-2. A Storage Adapter maps a storage backend into availability, capacity, durable write, integrity verification, materialization, restore, and exit capabilities.
+1. Runtime Adapter 把原生历史身份、发现、活跃性、保护、证据成员关系、打开与继续能力映射成 Harbor 历史对象合同。
+2. Storage Adapter 把存储后端映射成可用性、容量、持久化写入、完整性校验、物化、恢复与退出合同。
 
-The core owns admission policy, transactional docking, evidence receipts, manifests, indexing, recall, restore orchestration, and foreground resource budgets. It does not own a runtime's private session semantics or a storage provider's credential flow.
+核心负责准入策略、事务化停泊、证据回执、清单、索引、召回、恢复编排和前台资源预算。核心不拥有某个 Runtime 的私有会话语义，也不拥有某个存储供应商的凭据流程。
 
-Adapters publish a capability matrix. The core reports only independently verified capabilities and never upgrades evidence readability into native open or resume support.
+适配器必须发布能力矩阵。核心只报告经过独立验证的能力，绝不把“证据可读”升级描述成“原生可打开”或“可以继续”。
 
-The Codex integration remains the first concrete Runtime Adapter. We will document the candidate interface from it, but will not call that interface stable until a second real Runtime Adapter exercises the same seam. This follows the rule that one adapter makes a seam hypothetical; two adapters make it real.
+Codex 集成继续作为第一个具体 Runtime Adapter。我们会从它提炼候选接口，但在第二个真实 Runtime Adapter 实际穿过同一边界之前，不把该接口称为稳定：一个适配器只能提出假设，两个适配器才能验证边界。
 
-## Alternatives considered
+## 备选方案
 
-### Keep a Codex-specific product
+### 保持为 Codex 专用产品
 
-This minimizes near-term work but contradicts the product direction and spreads Codex assumptions through storage, indexing, UI, and evidence formats.
+短期工作量最小，但违背产品方向，也会让 Codex 假设扩散到存储、索引、界面和证据格式中。
 
-### Build a universal export archive
+### 构建通用导出归档
 
-This makes ingestion easy but preserves only files. It cannot honestly promise native discovery, opening, or continuation and would collapse distinct continuity levels into one misleading status.
+导入简单，却只能保存文件。它无法诚实承诺原生发现、打开或继续，还会把不同连续性等级折叠成一个误导状态。
 
-### Standardize the adapter interface before a second integration
+### 在第二个集成之前固化适配器接口
 
-This appears architecturally clean but would freeze assumptions learned from only one runtime. The resulting interface would likely be wide, leaky, and expensive to change.
+表面上架构整洁，实际会冻结仅从一个 Runtime 学到的假设，最终得到宽泛、泄漏且难以修改的接口。
 
-## Consequences
+## 影响
 
-- Current Codex behavior remains an implementation and evidence baseline, not the universal data model.
-- Runtime-specific code must move behind the Runtime Adapter seam as that seam is extracted.
-- Storage-specific behavior and credentials must remain behind the Storage Adapter seam.
-- Product UI and receipts must display capability level and adapter version.
-- Adding a model provider alone does not create a Runtime Adapter; a concrete harness with a persistent history contract is required.
-- The second runtime integration is an architectural validation milestone, not merely another import format.
+- 当前 Codex 行为是实现与证据基线，不是通用数据模型。
+- 随着边界提取，Runtime 特有代码必须进入 Runtime Adapter。
+- 存储特有行为与凭据必须留在 Storage Adapter 后方。
+- 产品界面与回执必须展示能力等级和适配器版本。
+- 仅增加模型供应商并不会形成 Runtime Adapter；必须存在具备持久历史合同的具体 Harness。
+- 第二个 Runtime 集成是架构验证里程碑，而不只是新增一种导入格式。

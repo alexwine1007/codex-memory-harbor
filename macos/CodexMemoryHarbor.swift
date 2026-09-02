@@ -3,6 +3,8 @@ import Cocoa
 final class CompactCardView: NSView {
     private let statusLabel = CompactCardView.label("检查中", size: 13, color: NSColor(calibratedWhite: 0.67, alpha: 1))
     private let eligibleLabel = CompactCardView.label("—", size: 52, weight: .bold)
+    private let headingLabel = CompactCardView.label("历史可访问", size: 12, color: NSColor(calibratedWhite: 0.67, alpha: 1))
+    private let noteLabel = CompactCardView.label("正在核验连续性", size: 12, color: NSColor(calibratedWhite: 0.67, alpha: 1))
     private let driveLabel = CompactCardView.label("正在读取本机状态", size: 12, color: NSColor(calibratedWhite: 0.67, alpha: 1))
     private let driveDot = NSView()
 
@@ -18,14 +20,12 @@ final class CompactCardView: NSView {
         addSubview(title)
         statusLabel.frame = NSRect(x: 72, y: 184, width: 210, height: 20)
         addSubview(statusLabel)
-        let heading = CompactCardView.label("可安全释放", size: 12, color: NSColor(calibratedWhite: 0.67, alpha: 1))
-        heading.frame = NSRect(x: 21, y: 150, width: 150, height: 19)
-        addSubview(heading)
+        headingLabel.frame = NSRect(x: 21, y: 150, width: 150, height: 19)
+        addSubview(headingLabel)
         eligibleLabel.frame = NSRect(x: 18, y: 87, width: 320, height: 62)
         addSubview(eligibleLabel)
-        let note = CompactCardView.label("不碰主任务，不读取正文", size: 12, color: NSColor(calibratedWhite: 0.67, alpha: 1))
-        note.frame = NSRect(x: 21, y: 66, width: 230, height: 19)
-        addSubview(note)
+        noteLabel.frame = NSRect(x: 21, y: 66, width: 230, height: 19)
+        addSubview(noteLabel)
         driveDot.frame = NSRect(x: 23, y: 32, width: 8, height: 8)
         driveDot.wantsLayer = true
         driveDot.layer?.cornerRadius = 4
@@ -33,7 +33,7 @@ final class CompactCardView: NSView {
         addSubview(driveDot)
         driveLabel.frame = NSRect(x: 39, y: 24, width: 190, height: 23)
         addSubview(driveLabel)
-        let button = NSButton(title: "整理空间", target: target, action: action)
+        let button = NSButton(title: "打开港口", target: target, action: action)
         button.frame = NSRect(x: 247, y: 18, width: 92, height: 38)
         button.isBordered = false
         button.font = .systemFont(ofSize: 13, weight: .semibold)
@@ -70,21 +70,32 @@ final class CompactCardView: NSView {
 
     func update(summary: [String: Any]) {
         let available = summary["volume_available"] as? Bool ?? false
-        eligibleLabel.stringValue = summary["eligible_h"] as? String ?? "—"
-        statusLabel.stringValue = available ? "工作正常" : "外挂盘未连接"
+        let docked = summary["docked_files"] as? Int ?? 0
+        let accessible = summary["docked_available"] as? Int ?? 0
+        let eligible = summary["eligible_files"] as? Int ?? 0
+        let eligibleSize = summary["eligible_h"] as? String ?? ""
+        let continuityHealthy = accessible == docked && (docked > 0 || available)
+        headingLabel.stringValue = "历史可访问"
+        eligibleLabel.stringValue = "\(accessible) / \(docked)"
+        statusLabel.stringValue = continuityHealthy ? "连续性正常" : "连续性待恢复"
+        noteLabel.stringValue = eligible > 0 ? "另有 \(eligible) 项（\(eligibleSize)）可安全停泊" : "已停泊历史当前可读取"
         if available {
             let name = summary["volume_name"] as? String ?? "外置盘"
             let free = summary["volume_free_h"] as? String ?? ""
             driveLabel.stringValue = "\(name) · \(free) 可用"
             driveDot.layer?.backgroundColor = NSColor.systemTeal.cgColor
         } else {
-            driveLabel.stringValue = "连接硬盘后可整理"
+            noteLabel.stringValue = docked > 0 ? "连接存储后可读取停泊历史" : "连接存储后可开始安全停泊"
+            driveLabel.stringValue = "外置存储尚未连接"
             driveDot.layer?.backgroundColor = NSColor.systemOrange.cgColor
         }
     }
 
     func showFailure() {
         statusLabel.stringValue = "状态暂不可用"
+        headingLabel.stringValue = "连续性状态"
+        eligibleLabel.stringValue = "—"
+        noteLabel.stringValue = "没有执行任何停泊或释放操作"
         driveLabel.stringValue = "打开详情后可重新扫描"
         driveDot.layer?.backgroundColor = NSColor.systemOrange.cgColor
     }

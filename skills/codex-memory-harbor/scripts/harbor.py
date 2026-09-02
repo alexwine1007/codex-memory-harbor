@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Memory Harbor: local inventory, verified offload, recovery, and dashboard."""
+"""Memory Harbor：本地清点、安全停泊、验证恢复与桌面仪表盘。"""
 
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ from collections import deque
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "0.4.4-beta.1"
+VERSION = "0.4.4-beta.2"
 DEFAULT_ARCHIVE = "Memory Harbor"
 LEGACY_ARCHIVES = ("Codex Memory Harbor",)
 CATALOG_SCHEMA_VERSION = 3
@@ -36,10 +36,38 @@ RECALL_EXTRACTION_VERSION = 1
 RECALL_CHUNK_CHARS = 6000
 RECALL_CHUNK_OVERLAP = 240
 RECALL_MAX_FRAGMENTS_PER_SESSION = 5000
+REASON_LABELS = {
+    "unreadable": "记录不可读取",
+    "main_task": "主任务受保护",
+    "already_offloaded": "已经停泊",
+    "drive_unavailable": "外置存储未连接",
+    "too_new": "静置时间不足",
+    "last_turn_incomplete": "最后一轮尚未完成",
+    "priority_project": "所属项目已保护",
+    "protected_session": "任务已设为长期保留",
+}
 
 
 class HarborError(RuntimeError):
     pass
+
+
+def user_error(exc: Exception) -> tuple[str, str]:
+    """Return a stable code and Chinese message without exposing raw system text."""
+    if isinstance(exc, HarborError):
+        return "harbor_error", str(exc)
+    if isinstance(exc, PermissionError):
+        return "permission_denied", "没有权限访问所需文件或存储设备"
+    if isinstance(exc, FileNotFoundError):
+        return "file_unavailable", "所需文件或存储位置当前不可用"
+    if isinstance(exc, json.JSONDecodeError):
+        return "invalid_json", "读取的数据格式无效"
+    if isinstance(exc, ValueError):
+        return "invalid_value", "输入值或数据格式无效"
+    if isinstance(exc, OSError):
+        code = f"os_error_{exc.errno}" if exc.errno is not None else "os_error"
+        return code, "本地文件操作未完成"
+    return "unexpected_error", "操作未完成；本地数据未因本次失败被释放"
 
 
 def config_path() -> Path:
@@ -166,18 +194,18 @@ def lexical_session(path_value: str, codex_home: Path) -> tuple[Path, Path]:
     try:
         relative = path.relative_to(root)
     except ValueError as exc:
-        raise HarborError(f"Session must be under {root}") from exc
+        raise HarborError(f"历史记录必须位于 {root} 下") from exc
     return path, relative
 
 
 def mounted_volume(path_value: str) -> Path:
     volume = Path(path_value).expanduser().absolute()
     if not str(volume).startswith("/Volumes/"):
-        raise HarborError("External volume must be mounted under /Volumes")
+        raise HarborError("外置存储必须挂载在 /Volumes 下")
     if not volume.is_dir() or not os.path.ismount(volume):
-        raise HarborError(f"External volume is not mounted: {volume}")
+        raise HarborError(f"外置存储尚未挂载：{volume}")
     if not os.access(volume, os.W_OK):
-        raise HarborError(f"External volume is not writable: {volume}")
+        raise HarborError(f"外置存储不可写：{volume}")
     return volume
 
 
@@ -797,7 +825,7 @@ def recall_fragments_from_session(path: Path) -> list[dict]:
 def index_session_memory(path_value: str, codex_home: Path, expected_sha256: str | None = None) -> dict:
     source, _ = lexical_session(path_value, codex_home)
     if not source.exists():
-        raise HarborError("Session evidence is unavailable; reconnect its archive before indexing")
+        raise HarborError("历史证据当前不可用；请重新连接对应存储后再建立索引")
     metadata = first_metadata(source)
     with managed_catalog(codex_home) as connection:
         item = connection.execute("SELECT source_sha256 FROM harbor_items WHERE source_path = ?", (str(source),)).fetchone()
@@ -933,7 +961,8 @@ def build_recall_index(codex_home: Path, paths: list[str] | None = None, linked_
         try:
             results.append(index_session_memory(item["path"], codex_home))
         except (HarborError, OSError, ValueError, json.JSONDecodeError) as exc:
-            errors.append({"source": item["path"], "error": str(exc)})
+            code, message = user_error(exc)
+            errors.append({"source": item["path"], "error_code": code, "error": message})
     return {
         "sessions": len(results), "fragments": sum(item["fragments"] for item in results),
         "unchanged": sum(bool(item.get("unchanged")) for item in results),
@@ -1099,17 +1128,17 @@ def indexed_rollout_path(codex_home: Path, thread_id: str, rollout_value: str | 
                 return path
         except (OSError, ValueError, json.JSONDecodeError):
             continue
-    raise HarborError("Task record file is unavailable")
+    raise HarborError("任务记录文件当前不可用")
 
 
 def thread_detail(codex_home: Path, thread_id: str) -> dict:
     """Read one requested Codex index preview; never scan the rollout body."""
     allowed = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
     if not thread_id or len(thread_id) > 128 or any(char not in allowed for char in thread_id):
-        raise HarborError("Invalid task id")
+        raise HarborError("任务 ID 无效")
     database = state_database(codex_home)
     if not database:
-        raise HarborError("Codex task index is unavailable")
+        raise HarborError("Codex 任务索引当前不可用")
     try:
         with read_only_database(database) as connection:
             row = connection.execute(
@@ -1117,9 +1146,9 @@ def thread_detail(codex_home: Path, thread_id: str) -> dict:
                 (thread_id,),
             ).fetchone()
     except sqlite3.Error as exc:
-        raise HarborError("Unable to read the Codex task index") from exc
+        raise HarborError("无法读取 Codex 任务索引") from exc
     if not row:
-        raise HarborError("Task is not present in the Codex index")
+        raise HarborError("Codex 索引中不存在该任务")
     rollout_path = indexed_rollout_path(codex_home, thread_id, row["rollout_path"])
     metadata = first_metadata(rollout_path)
     created = row["created_at_ms"] or ((row["created_at"] or 0) * 1000)
@@ -1145,7 +1174,7 @@ def task_record(codex_home: Path, thread_id: str, maximum_messages: int = 80) ->
     """Read one requested sub-agent's visible status messages, excluding inherited parent history."""
     detail = thread_detail(codex_home, thread_id)
     if not detail["is_subagent"]:
-        raise HarborError("This task opens directly in Codex")
+        raise HarborError("该任务应直接在 Codex 中打开")
     path = Path(detail["rollout_path"])
     agent_path = detail["agent_path"]
     started = False
@@ -1171,7 +1200,7 @@ def task_record(codex_home: Path, thread_id: str, maximum_messages: int = 80) ->
                 if message:
                     messages.append({"timestamp": value.get("timestamp"), "message": message[:12000]})
     except OSError as exc:
-        raise HarborError("Unable to read the task record") from exc
+        raise HarborError("无法读取任务记录") from exc
     return {
         "id": thread_id,
         "title": detail["title"],
@@ -1213,7 +1242,7 @@ def resolve_storage_target(data: dict) -> str:
     provider = target.get("provider") or "external_volume"
     location = target.get("location") or data.get("volume") or ""
     if provider != "external_volume":
-        raise HarborError(f"Storage provider is not available yet: {provider}")
+        raise HarborError(f"该存储后端尚不可用：{provider}")
     return str(mounted_volume(location))
 
 
@@ -1227,14 +1256,15 @@ def session_record(path: Path, min_age: float, priority=None, protected_sessions
         error = None
     except Exception as exc:
         meta = {"id": None, "parent_thread_id": None, "cwd": None, "timestamp": None, "thread_source": None, "agent_nickname": None, "agent_path": None}
-        error = str(exc)
+        _, error = user_error(exc)
     try:
         logical = path.stat().st_size
         modified = path.stat().st_mtime if not linked else (backup.stat().st_mtime if backup.is_file() else path.lstat().st_mtime)
         completed = last_turn_complete(path) if target_exists or not linked else False
     except OSError as exc:
         logical, modified, completed = 0, path.lstat().st_mtime, False
-        error = error or str(exc)
+        _, message = user_error(exc)
+        error = error or message
     age = max(0.0, (time.time() - modified) / 86400)
     kind = "child" if meta.get("parent_thread_id") else "main"
     reasons = []
@@ -1311,10 +1341,14 @@ def compact_summary(codex_home: Path, repair: bool = False) -> dict:
     config = load_config()
     snapshot = scan(codex_home, 30, config["protected_projects"], config["protected_sessions"])
     volume = next((item for item in snapshot["volumes"] if item.get("writable")), None)
+    docked = [item for item in snapshot["sessions"] if item.get("linked")]
+    docked_available = sum(bool(item.get("target_exists")) for item in docked)
     return {
         "version": VERSION,
         "eligible_h": snapshot["totals"]["eligible_h"],
         "eligible_files": snapshot["totals"]["eligible_files"],
+        "docked_files": len(docked),
+        "docked_available": docked_available,
         "disk_free_h": snapshot["disk"]["free_h"],
         "volume_available": bool(volume),
         "volume_name": volume.get("name", "") if volume else "",
@@ -1335,20 +1369,21 @@ def plan_offload(path_value: str, codex_home: Path, volume_value: str, archive_n
     source, relative = lexical_session(path_value, codex_home)
     volume = mounted_volume(volume_value)
     if source.is_symlink() or not source.is_file():
-        raise HarborError("Source must be a local regular session file")
+        raise HarborError("来源必须是本机的普通历史记录文件")
     item = session_record(source, min_age, priority, protected_sessions)
     attach_project(item, load_project_catalog(codex_home))
     attach_thread_title(item, load_thread_catalog(codex_home))
     if not item["eligible"]:
-        raise HarborError("Session is not eligible: " + ", ".join(item["reasons"]))
+        reasons = [REASON_LABELS.get(reason, reason) for reason in item["reasons"]]
+        raise HarborError("该历史记录当前不可停泊：" + "；".join(reasons))
     handles = open_handles(source)
     if handles:
-        raise HarborError(f"Session has {handles} open handles")
+        raise HarborError(f"该历史记录仍有 {handles} 个打开的文件句柄")
     destination = volume / archive_name / "sessions" / relative
     identity = volume_identity(volume)
     backup = source.with_name(source.name + ".offload-local-backup")
     if backup.exists() or backup.is_symlink():
-        raise HarborError(f"Rollback copy already exists: {backup}")
+        raise HarborError(f"本地回滚副本已存在：{backup}")
     return {
         "manifest_version": MANIFEST_SCHEMA_VERSION,
         "source": str(source), "destination": str(destination), "archive_relative": str(destination.relative_to(volume)),
@@ -1370,12 +1405,12 @@ def offload_one(plan: dict, volume: Path, archive_name: str, codex_home: Path | 
     shutil.copy2(source, destination)
     if destination.stat().st_size != plan["bytes"] or sha256(destination) != plan["sha256"]:
         destination.unlink(missing_ok=True)
-        raise HarborError("External copy verification failed")
+        raise HarborError("外部副本校验失败")
     os.replace(source, backup)
     try:
         source.symlink_to(destination)
         if sha256(source) != plan["sha256"]:
-            raise HarborError("Symlink verification failed")
+            raise HarborError("连续性链接校验失败")
     except Exception:
         source.unlink(missing_ok=True); os.replace(backup, source); raise
     record = {**plan, "event": "offloaded_with_local_backup", "recorded_at": int(time.time())}
@@ -1388,7 +1423,7 @@ def offload_one(plan: dict, volume: Path, archive_name: str, codex_home: Path | 
 def audit_one(path_value: str, codex_home: Path) -> dict:
     source, _ = lexical_session(path_value, codex_home)
     if not source.is_symlink():
-        raise HarborError("Source is not an offload symlink")
+        raise HarborError("来源不是停泊后的连续性链接")
     target = Path(os.readlink(source)); backup = source.with_name(source.name + ".offload-local-backup")
     result = {"source": str(source), "target": str(target), "target_exists": target.is_file(), "backup": str(backup), "backup_exists": backup.is_file()}
     if target.is_file(): result["target_sha256"] = sha256(target); result["source_sha256"] = sha256(source)
@@ -1401,7 +1436,7 @@ def audit_one(path_value: str, codex_home: Path) -> dict:
 def finalize_one(path_value: str, codex_home: Path) -> dict:
     audit = audit_one(path_value, codex_home)
     if not audit["verified"] or not audit["backup_exists"]:
-        raise HarborError("A verified link and local rollback copy are required")
+        raise HarborError("释放本地副本前必须同时具备已验证链接和本地回滚副本")
     backup = Path(audit["backup"]); released = backup.stat().st_size; backup.unlink()
     return {**audit, "event": "local_backup_removed", "bytes_released": released, "bytes_released_h": human_bytes(released)}
 
@@ -1430,7 +1465,7 @@ def migrate_path(path_value: str, codex_home: Path, volume: Path, archive_name: 
     if source.is_symlink():
         audit = audit_one(path_value, codex_home)
         if not audit["verified"]:
-            raise HarborError("Existing offload link failed verification")
+            raise HarborError("现有停泊链接未通过校验")
         if audit["backup_exists"]:
             finalized = finalize_one(path_value, codex_home)
             return {**audit, "event": "migrated_external_primary", "backup_exists": False, "bytes_released": finalized["bytes_released"], "bytes_released_h": finalized["bytes_released_h"]}
@@ -1441,17 +1476,17 @@ def migrate_path(path_value: str, codex_home: Path, volume: Path, archive_name: 
 
 def restore_one(path_value: str, codex_home: Path) -> dict:
     source, _ = lexical_session(path_value, codex_home)
-    if not source.is_symlink(): raise HarborError("Source is not an offload symlink")
+    if not source.is_symlink(): raise HarborError("来源不是停泊后的连续性链接")
     target = Path(os.readlink(source))
-    if not target.is_file(): raise HarborError("External target is unavailable")
+    if not target.is_file(): raise HarborError("外部历史实体当前不可用")
     expected = sha256(target); backup = source.with_name(source.name + ".offload-local-backup")
     if backup.is_file():
-        if sha256(backup) != expected: raise HarborError("Rollback copy does not match external target")
+        if sha256(backup) != expected: raise HarborError("本地回滚副本与外部历史实体不一致")
         source.unlink(); os.replace(backup, source)
     else:
         temporary = source.with_name(source.name + ".restore-temp")
         shutil.copy2(target, temporary)
-        if sha256(temporary) != expected: temporary.unlink(missing_ok=True); raise HarborError("Restored copy verification failed")
+        if sha256(temporary) != expected: temporary.unlink(missing_ok=True); raise HarborError("恢复后的副本校验失败")
         source.unlink(); os.replace(temporary, source)
     return {"source": str(source), "target": str(target), "sha256": expected, "event": "restored_local_regular_file"}
 
@@ -1505,7 +1540,7 @@ class HarborHandler(BaseHTTPRequestHandler):
         raw = file.read_bytes(); self.send_response(200); self.send_header("Content-Type", mimetypes.guess_type(file.name)[0] or "application/octet-stream")
         self.send_header("Cache-Control", "no-store"); self.send_header("Content-Length", str(len(raw))); self.end_headers(); self.wfile.write(raw)
     def do_POST(self):
-        if self.headers.get("X-Harbor-Token") != self.app["token"]: return self.send_json(403, {"error": "Invalid action token"})
+        if self.headers.get("X-Harbor-Token") != self.app["token"]: return self.send_json(403, {"error_code": "invalid_action_token", "error": "操作令牌无效，请重新打开仪表盘"})
         mutation_lock = self.app.get("mutation_lock") if self.path in ("/api/offload", "/api/migrate", "/api/finalize", "/api/restore") else None
         if mutation_lock:
             mutation_lock.acquire()
@@ -1517,7 +1552,7 @@ class HarborHandler(BaseHTTPRequestHandler):
                 return self.send_json(200, {"ok": True, "settings": saved})
             if self.path == "/api/protect":
                 cfg = load_config(); scope, value, enabled = data.get("scope"), str(data.get("value") or ""), bool(data.get("enabled"))
-                if scope not in ("project", "session") or not value: raise HarborError("Invalid protection target")
+                if scope not in ("project", "session") or not value: raise HarborError("保护目标无效")
                 key = "protected_projects" if scope == "project" else "protected_sessions"; values = set(cfg[key])
                 values.add(value) if enabled else values.discard(value); cfg[key] = sorted(values)
                 saved = save_config(cfg["protected_projects"], cfg["protected_sessions"]); self.app["priority"] = "\n".join(saved["protected_projects"]); self.app["protected_sessions"] = saved["protected_sessions"]; self.app["cache"] = None
@@ -1540,7 +1575,7 @@ class HarborHandler(BaseHTTPRequestHandler):
                 )
                 return self.send_json(200, {"ok": not bool(result["errors"]), **result})
             paths = data.get("paths") or []
-            if not paths: raise HarborError("No sessions selected")
+            if not paths: raise HarborError("尚未选择任何历史记录")
             results = []
             if self.path == "/api/plan":
                 volume_value = resolve_storage_target(data)
@@ -1556,7 +1591,7 @@ class HarborHandler(BaseHTTPRequestHandler):
             elif self.path == "/api/audit":
                 for path in paths: results.append(audit_one(path, self.app["codex_home"]))
             elif self.path == "/api/finalize":
-                if data.get("confirmation") != "DELETE LOCAL BACKUPS": raise HarborError("Confirmation phrase does not match")
+                if data.get("confirmation") != "DELETE LOCAL BACKUPS": raise HarborError("确认短语不匹配")
                 for path in paths: results.append(finalize_one(path, self.app["codex_home"]))
             elif self.path == "/api/restore":
                 for path in paths: results.append(restore_one(path, self.app["codex_home"]))
@@ -1564,7 +1599,9 @@ class HarborHandler(BaseHTTPRequestHandler):
             self.app["cache"] = None
             self.send_json(200, {"ok": True, "results": results})
         except Exception as exc:
-            self.send_json(400, {"ok": False, "error": str(exc)})
+            sys.stderr.write(f"[harbor] {type(exc).__name__}: {exc}\n")
+            code, message = user_error(exc)
+            self.send_json(400, {"ok": False, "error_code": code, "error": message})
         finally:
             if mutation_lock:
                 mutation_lock.release()
@@ -1653,7 +1690,8 @@ def main() -> int:
         elif args.command == "compact-status":
             print(json.dumps(compact_summary(home, args.repair_links), ensure_ascii=False))
     except (HarborError, OSError, ValueError, json.JSONDecodeError) as exc:
-        print(f"error: {exc}", file=sys.stderr); return 1
+        code, message = user_error(exc)
+        print(f"错误 [{code}]：{message}", file=sys.stderr); return 1
     return 0
 
 

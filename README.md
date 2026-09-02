@@ -110,7 +110,7 @@ unchanged content is skipped. No model, embedding runtime, or network request is
 the 0.4 foreground path.
 
 The desktop card is native Cocoa and keeps neither WebKit nor the Python dashboard server
-resident. Clicking `整理空间` launches an isolated detail helper; `放回桌面` terminates that
+resident. Clicking `打开港口` launches an isolated detail helper; `放回桌面` terminates that
 helper and server so macOS can reclaim their complete working set.
 
 Each detail helper owns an ephemeral localhost port rather than competing for one fixed

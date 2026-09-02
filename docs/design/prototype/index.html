@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Memory Harbor｜中文 AI 科幻交互原型</title>
+  <link rel="stylesheet" href="prototype.css">
+</head>
+<body>
+  <div class="cosmos" aria-hidden="true"><i></i><i></i><i></i></div>
+  <div class="prototype-banner">视觉原型 · 中文界面 · 不连接真实数据与迁移操作</div>
+  <div class="shell">
+    <aside class="rail">
+      <a class="brand" href="#overview" data-route="overview" aria-label="Memory Harbor 总览">
+        <span class="brand-mark"><img src="../../../skills/codex-memory-harbor/assets/dashboard/memory-harbor-logo-v4.png" alt=""></span>
+        <span><b>Memory Harbor</b><small>智能历史港</small></span>
+      </a>
+
+      <nav aria-label="主导航">
+        <button class="nav-item active" data-route="overview"><span>◈</span><b>港口总览</b></button>
+        <button class="nav-item" data-route="history"><span>⌁</span><b>历史星图</b></button>
+        <button class="nav-item" data-route="docking"><span>⇣</span><b>停泊队列</b><em>0</em></button>
+        <button class="nav-item" data-route="integrity"><span>⬡</span><b>完整性核心</b></button>
+        <button class="nav-item" data-route="connections"><span>⌘</span><b>连接矩阵</b></button>
+        <button class="nav-item" data-route="activity"><span>≋</span><b>证据回执</b></button>
+        <button class="nav-item" data-route="settings"><span>⊙</span><b>系统设置</b></button>
+      </nav>
+
+      <div class="rail-status">
+        <span class="pulse"></span>
+        <div><b>本地核心在线</b><small>外发数据 0 · 空闲无扫描</small></div>
+      </div>
+    </aside>
+
+    <main>
+      <header class="topbar">
+        <div>
+          <small id="eyebrow">MEMORY HARBOR / OVERVIEW</small>
+          <h1 id="pageTitle">港口总览</h1>
+        </div>
+        <div class="top-actions">
+          <button class="command" id="commandButton"><kbd>⌘</kbd><kbd>K</kbd><span>智能指令</span></button>
+          <button class="health"><i></i><span><small>全局状态</small><b>连续性正常</b></span></button>
+          <button class="avatar" aria-label="本地用户">A</button>
+        </div>
+      </header>
+
+      <section class="page active" id="overview" data-title="港口总览" data-eyebrow="MEMORY HARBOR / OVERVIEW">
+        <article class="continuity-hero panel">
+          <div class="hero-copy">
+            <span class="signal-label"><i></i> 连续性核心在线</span>
+            <h2>你的智能工作历史<br><em>正在被完整守护</em></h2>
+            <p>所有已停泊历史均可定位、可验证并可读取。当前没有需要你处理的风险事件。</p>
+            <div class="hero-actions">
+              <button class="primary" data-route="history">进入历史星图 <span>→</span></button>
+              <button class="secondary evidence-trigger">查看最新验证证据</button>
+            </div>
+          </div>
+          <div class="continuity-core" aria-label="连续性成功率 100%">
+            <div class="orbit orbit-a"><i></i></div>
+            <div class="orbit orbit-b"><i></i></div>
+            <div class="core-glow"></div>
+            <div class="core-value"><small>连续性成功率</small><strong>100<sup>%</sup></strong><span>194 / 194 在线可读</span></div>
+          </div>
+          <div class="hero-grid" aria-hidden="true"></div>
+        </article>
+
+        <div class="metric-grid">
+          <article class="metric panel cyan"><span>已停泊历史</span><b>194</b><small>27.6 GB 原始证据</small><i style="--level:78%"></i></article>
+          <article class="metric panel violet"><span>本地召回层</span><b>189</b><small>583 条可追溯线索</small><i style="--level:62%"></i></article>
+          <article class="metric panel mint"><span>召回响应</span><b>1.1<sup>ms</sup></b><small>p95 · 预算 25 ms</small><i style="--level:94%"></i></article>
+          <article class="metric panel amber"><span>内盘可用</span><b>55.6<sup>GB</sup></b><small>当前无需整理</small><i style="--level:48%"></i></article>
+        </div>
+
+        <div class="overview-grid">
+          <article class="panel intelligence-card">
+            <div class="section-head"><div><span class="kicker">智能召回</span><h3>从 518 段工作历史中寻找关联</h3></div><button data-route="history">打开历史星图</button></div>
+            <div class="recall-box"><span>⌕</span><p>输入一个主题，例如“上次关于跨 Runtime 连续性的决定”</p><kbd>⌘ K</kbd></div>
+            <div class="trace-line"><i></i><i></i><i></i><i></i><i></i></div>
+            <p class="subtle">只返回少量带出处的候选证据，不把历史内容当作当前指令。</p>
+          </article>
+          <article class="panel status-card">
+            <div class="section-head"><div><span class="kicker">连接状态</span><h3>Runtime 与存储</h3></div><button data-route="connections">管理连接</button></div>
+            <div class="connection-row"><span class="runtime-symbol">C</span><div><b>Codex Runtime</b><small>C0–C3 · 已验证</small></div><em class="ok">在线</em></div>
+            <div class="connection-row"><span class="drive-symbol"></span><div><b>Alex’s Disk</b><small>外置卷 · 918.7 GB 可用</small></div><em class="ok">在线</em></div>
+            <div class="connection-row muted"><span class="runtime-symbol">O</span><div><b>OpenClaw Adapter</b><small>候选 · 尚未接入</small></div><em>规划中</em></div>
+          </article>
+        </div>
+
+        <article class="panel receipt-strip">
+          <div><span class="receipt-icon">✓</span><span><b>最近一次完整性巡检通过</b><small>194 个外部目标在线 · 本地索引一致 · 2026-09-03 05:42</small></span></div>
+          <button class="evidence-trigger">打开证据回执</button>
+        </article>
+      </section>
+
+      <section class="page" id="history" data-title="历史星图" data-eyebrow="MEMORY HARBOR / HISTORY MAP">
+        <div class="page-intro"><div><span class="kicker">跨 Runtime 发现</span><h2>不是翻文件，而是找回当时的工作关系</h2><p>搜索只返回带来源、时间、位置和内容哈希的证据线索。</p></div><button class="primary" id="focusHistory">开始智能召回</button></div>
+        <article class="panel explorer">
+          <div class="explorer-tools"><label><span>⌕</span><input id="historySearch" placeholder="搜索主题、项目、任务或证据编号"></label><button>Runtime：全部</button><button>状态：全部</button><button>时间：全部</button></div>
+          <div class="history-layout">
+            <div class="history-list" id="historyList">
+              <button class="history-row active" data-keywords="连续性 runtime adapter 产品架构"><span class="node cyan-node"></span><span><b>Memory Harbor 通用 Runtime 架构</b><small>Codex · 产品与架构 · 18 分钟前</small></span><em>C3</em></button>
+              <button class="history-row" data-keywords="召回 证据 索引 关联"><span class="node violet-node"></span><span><b>关联召回与证据分层</b><small>Codex · 技术研究 · 今天</small></span><em>C1</em></button>
+              <button class="history-row" data-keywords="视频 项目 审计 交付"><span class="node mint-node"></span><span><b>影像项目证据审计</b><small>Codex · 制作项目 · 11 天前</small></span><em>C2</em></button>
+              <button class="history-row" data-keywords="openclaw 记忆 迁移"><span class="node amber-node"></span><span><b>OpenClaw 长期记忆迁移</b><small>外部证据 · 候选 Adapter · 47 天前</small></span><em>C1</em></button>
+              <div class="history-empty" id="historyEmpty" hidden>没有匹配的历史证据</div>
+            </div>
+            <div class="history-detail">
+              <span class="signal-label"><i></i> 原始证据在线</span>
+              <h3>Memory Harbor 通用 Runtime 架构</h3>
+              <p>产品核心保持 Runtime 无关，通过显式 Adapter 接入不同 Harness；第二个真实 Adapter 完成前不宣称接口成熟。</p>
+              <dl><div><dt>来源 Runtime</dt><dd>Codex</dd></div><div><dt>连续性能力</dt><dd>C3 · 可继续工作</dd></div><div><dt>证据位置</dt><dd>Alex’s Disk</dd></div><div><dt>内容校验</dt><dd>SHA-256 一致</dd></div></dl>
+              <button class="primary evidence-trigger">读取证据与出处</button>
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <section class="page" id="docking" data-title="停泊队列" data-eyebrow="MEMORY HARBOR / DOCKING">
+        <div class="page-intro"><div><span class="kicker">安全状态转换</span><h2>每一步都可解释、可停止、可恢复</h2><p>当前没有符合安全条件的待停泊对象。</p></div><button class="primary" disabled>查看停泊方案</button></div>
+        <article class="panel pipeline">
+          <div class="pipeline-step done"><i>01</i><span><b>准入检查</b><small>排除主任务、活跃对象和受保护历史</small></span></div>
+          <div class="pipeline-step"><i>02</i><span><b>暂存与持久化</b><small>写入临时实体并完成介质持久化屏障</small></span></div>
+          <div class="pipeline-step"><i>03</i><span><b>内容验证</b><small>长度、SHA-256 与独立回读</small></span></div>
+          <div class="pipeline-step"><i>04</i><span><b>连续性接管</b><small>由 Runtime Adapter 保留原生读取路径</small></span></div>
+          <div class="pipeline-step"><i>05</i><span><b>独立复核</b><small>通过后才允许释放本地实体</small></span></div>
+        </article>
+        <article class="panel empty-state"><div class="empty-orbit"><i></i></div><h3>港口目前没有等待停泊的历史</h3><p>所有候选对象都太新、仍在使用或已被长期保护。</p><button>查看保护规则</button></article>
+      </section>
+
+      <section class="page" id="integrity" data-title="完整性核心" data-eyebrow="MEMORY HARBOR / INTEGRITY">
+        <div class="page-intro"><div><span class="kicker">可验证，而非仅仅存在</span><h2>194 个停泊对象通过当前检查</h2><p>介质在线、路径可解析、目标实体存在；断电耐久性仍是待完成验收。</p></div><button class="primary evidence-trigger">查看巡检回执</button></div>
+        <div class="integrity-grid">
+          <article class="panel integrity-score"><div class="score-ring"><strong>100%</strong><span>当前可访问</span></div><ul><li><i></i>目标在线 <b>194 / 194</b></li><li><i></i>索引可发现 <b>194 / 194</b></li><li><i></i>路径可解析 <b>194 / 194</b></li><li class="pending"><i></i>断电耐久性 <b>待验收</b></li></ul></article>
+          <article class="panel event-stream"><div class="section-head"><div><span class="kicker">风险雷达</span><h3>当前没有数据可靠性事件</h3></div><span class="live-badge">实时事件</span></div><div class="radar"><span></span><i></i><b></b></div><small>系统不会通过后台全盘轮询制造“实时”假象。</small></article>
+        </div>
+      </section>
+
+      <section class="page" id="connections" data-title="连接矩阵" data-eyebrow="MEMORY HARBOR / CONNECTIONS">
+        <div class="page-intro"><div><span class="kicker">能力，而不是品牌承诺</span><h2>每个 Runtime 都公开自己的连续性上限</h2><p>“已连接”不等于“能继续工作”。</p></div><button>查看 Adapter 规范</button></div>
+        <div class="adapter-grid">
+          <article class="panel adapter-card active-adapter"><div class="adapter-head"><span class="runtime-symbol">C</span><span><b>Codex Runtime</b><small>Adapter 0.4.4 · macOS</small></span><em>已验证</em></div><div class="capabilities"><span class="on">C0<small>可发现</small></span><span class="on">C1<small>证据可读</small></span><span class="on">C2<small>原生打开</small></span><span class="on">C3<small>继续工作</small></span></div><p>518 个历史对象 · 194 个已停泊</p></article>
+          <article class="panel adapter-card"><div class="adapter-head"><span class="runtime-symbol">O</span><span><b>OpenClaw</b><small>候选 Runtime Adapter</small></span><em>未接入</em></div><div class="capabilities"><span>C0<small>待验证</small></span><span>C1<small>待验证</small></span><span>C2<small>待验证</small></span><span>C3<small>待验证</small></span></div><p>计划作为第二个真实 Adapter 验证通用核心。</p></article>
+          <article class="panel adapter-card"><div class="adapter-head"><span class="runtime-symbol">D</span><span><b>DeepSeek 相关 Harness</b><small>需要具体客户端历史合同</small></span><em>未定义</em></div><div class="capabilities"><span>C0<small>待定义</small></span><span>C1<small>待定义</small></span><span>C2<small>待定义</small></span><span>C3<small>待定义</small></span></div><p>模型名称本身不构成 Runtime 支持。</p></article>
+        </div>
+      </section>
+
+      <section class="page" id="activity" data-title="证据回执" data-eyebrow="MEMORY HARBOR / RECEIPTS">
+        <div class="page-intro"><div><span class="kicker">每次变化都有来路</span><h2>不是一条“成功”，而是一组可重放证据</h2><p>回执记录对象、阶段、版本、时间和完整性标识。</p></div><button>导出当前视图</button></div>
+        <article class="panel receipt-table"><div class="table-head"><span>结果</span><span>事件</span><span>范围</span><span>证据</span><span>时间</span></div><button class="table-row evidence-trigger"><span><i class="dot-ok"></i>通过</span><span>完整性巡检</span><span>194 个对象</span><span>路径 + 目标</span><span>05:42</span></button><button class="table-row evidence-trigger"><span><i class="dot-ok"></i>通过</span><span>召回基准</span><span>100 次查询</span><span>p95 1.1 ms</span><span>05:20</span></button><button class="table-row evidence-trigger"><span><i class="dot-info"></i>记录</span><span>产品契约更新</span><span>Runtime 中立</span><span>commit 3e81d09</span><span>05:14</span></button></article>
+      </section>
+
+      <section class="page" id="settings" data-title="系统设置" data-eyebrow="MEMORY HARBOR / SETTINGS">
+        <div class="page-intro"><div><span class="kicker">本地、透明、可退出</span><h2>你拥有历史、位置、索引和退出权</h2><p>设置不会把凭据或历史正文写入普通日志。</p></div></div>
+        <div class="settings-grid">
+          <article class="panel setting-group"><h3>停泊策略</h3><label><span><b>最小静置时间</b><small>历史对象至少静置 30 天</small></span><button>30 天</button></label><label><span><b>默认保留本地副本</b><small>保留时不会释放对应内盘空间</small></span><button class="toggle" aria-pressed="false"><i></i></button></label><label><span><b>前台活跃时自动降速</b><small>保护当前 Agent 工作响应性</small></span><button class="toggle on" aria-pressed="true"><i></i></button></label></article>
+          <article class="panel setting-group"><h3>隐私与索引</h3><label><span><b>默认云端外发</b><small>Memory Harbor 不上传历史内容</small></span><em>关闭且锁定</em></label><label><span><b>本地召回层</b><small>583 条可撤销证据线索</small></span><button>管理</button></label><label><span><b>清除召回索引</b><small>不删除外部原始历史</small></span><button class="danger">查看影响</button></label></article>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <aside class="evidence-drawer" id="evidenceDrawer" aria-hidden="true">
+    <div class="drawer-head"><div><span class="kicker">验证证据</span><h2>完整性巡检回执</h2></div><button id="closeDrawer" aria-label="关闭证据回执">×</button></div>
+    <div class="receipt-id">MH-20260903-0542-AUDIT</div>
+    <div class="evidence-status"><span>✓</span><div><b>当前范围全部通过</b><small>这不是断电耐久性验收</small></div></div>
+    <dl><div><dt>对象范围</dt><dd>194 个停泊对象</dd></div><div><dt>Storage Adapter</dt><dd>外置卷 · exFAT</dd></div><div><dt>Runtime Adapter</dt><dd>Codex 0.4.4</dd></div><div><dt>检查项目</dt><dd>目标存在、路径解析、索引一致</dd></div><div><dt>未证明边界</dt><dd>突然断电后的介质持久化</dd></div></dl>
+    <button class="primary">查看完整技术证据</button>
+  </aside>
+  <div class="scrim" id="scrim"></div>
+
+  <dialog id="commandPalette">
+    <div class="palette-search"><span>⌕</span><input id="commandSearch" placeholder="搜索页面或输入一个动作"><kbd>ESC</kbd></div>
+    <div class="palette-results">
+      <button data-route="history"><span>⌁</span><span><b>搜索历史星图</b><small>查找带出处的历史证据</small></span></button>
+      <button data-route="integrity"><span>⬡</span><span><b>检查完整性状态</b><small>查看风险与恢复路径</small></span></button>
+      <button data-route="connections"><span>⌘</span><span><b>查看连接矩阵</b><small>Runtime 与存储能力</small></span></button>
+    </div>
+  </dialog>
+  <script src="prototype.js"></script>
+</body>
+</html>

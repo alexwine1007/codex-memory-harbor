@@ -1,45 +1,45 @@
-# Memory Harbor
+# Memory Harbor 领域语言
 
-Memory Harbor 保存个人与智能代理共同完成的工作历史，使其在离开活跃存储后仍然可验证、可发现、可访问，并在运行时能力允许时可继续。
+Memory Harbor 保存人与智能代理共同完成的工作历史，使其离开活跃存储后仍然可验证、可发现、可访问，并在运行时能力允许时继续工作。
 
-## Language
+## 统一术语
 
-**Agent Runtime**:
-承载 Agent 工作、保存其原生历史身份并决定历史如何打开或继续的运行环境。Claude Code、Codex 和 OpenClaw 是候选 Agent Runtime。
-_Avoid_: Model, provider
+**Agent Runtime（代理运行时）**
 
-**Harness**:
-围绕一个或多个模型提供任务编排、工具调用、状态保存和交互入口的 Agent Runtime 形态。
-_Avoid_: Model
+承载 Agent 工作、保存原生历史身份，并决定历史如何打开或继续的运行环境。Claude Code、Codex 和 OpenClaw 都是候选 Agent Runtime。不要把它简称为模型或模型供应商。
 
-**Model Provider**:
-提供推理模型或模型接口但不必拥有任务历史合同的系统。DeepSeek 通常属于这一类，除非所指的是一个具体的持久化客户端或 Harness。
-_Avoid_: Runtime, Harness
+**Harness（代理执行框架）**
 
-**History Object**:
-某个 Agent Runtime 中可被独立识别、保护、停泊、校验和恢复的最小工作历史实体。
-_Avoid_: File, chat log
+围绕一个或多个模型提供任务编排、工具调用、状态保存和交互入口的一类 Agent Runtime。不要把 Harness 等同于底层模型。
 
-**Docking**:
-历史对象在保留可验证证据和已声明连续性能力的前提下，从活跃存储迁入冷存储的状态转换。
-_Avoid_: Cleanup, deletion, backup
+**Model Provider（模型供应商）**
 
-**Native Continuity**:
-历史对象停泊后，原 Agent Runtime 仍能按其原生身份发现和使用该对象的能力总称；具体能力必须声明为可发现、证据可读、原生可打开或可继续工作。
-_Avoid_: Backup success, file exists
+提供推理模型或模型接口、但不一定拥有任务历史合同的系统。DeepSeek 通常属于这一类；只有指向一个具体、持久化的客户端或 Harness 时，才可能形成 Runtime 集成目标。
 
-**Runtime Adapter**:
-一个 Agent Runtime 的原生历史合同与 Memory Harbor 历史对象合同之间的翻译者。
-_Avoid_: Importer, one-off script
+**History Object（历史对象）**
 
-**Storage Adapter**:
-某类存储后端与 Memory Harbor 的可用性、持久化、完整性、物化和恢复合同之间的翻译者。
-_Avoid_: Destination path
+某个 Agent Runtime 中可被独立识别、保护、停泊、校验和恢复的最小工作历史实体。它不只是一个普通文件或聊天日志。
 
-**Recall Lead**:
-从本地索引返回、带有原始出处但尚未被提升为当前事实的有限历史线索。
-_Avoid_: Memory, instruction, truth
+**Docking（停泊）**
 
-**Evidence Receipt**:
-记录一次停泊、校验、恢复或兼容性验收所使用对象、阶段结果、时间、版本和完整性标识的可审计证明。
-_Avoid_: Success message, log line
+历史对象在保留可验证证据和已声明连续性能力的前提下，从活跃存储进入冷存储的状态转换。不要把它写成清理、删除或普通备份。
+
+**Native Continuity（原生连续性）**
+
+历史对象停泊后，原 Agent Runtime 仍能按原生身份发现和使用它的能力总称。具体能力必须分别声明为可发现、证据可读、原生可打开或可继续工作；“备份成功”或“文件存在”不能代替这一结论。
+
+**Runtime Adapter（运行时适配器）**
+
+把某个 Agent Runtime 的原生历史合同翻译成 Memory Harbor 历史对象合同的边界。它不是一次性导入脚本。
+
+**Storage Adapter（存储适配器）**
+
+把某类存储后端翻译成 Memory Harbor 的可用性、持久化、完整性、物化和恢复合同。它不只是一个目标路径。
+
+**Recall Lead（召回线索）**
+
+本地索引返回的有限历史线索，必须携带原始出处，但在复核之前不能提升为当前事实、长期记忆或指令。
+
+**Evidence Receipt（证据回执）**
+
+记录一次停泊、校验、恢复或兼容性验收所涉及对象、阶段结果、时间、版本和完整性标识的可审计证明。单条成功提示或日志行不构成证据回执。

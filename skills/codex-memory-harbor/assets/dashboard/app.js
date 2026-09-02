@@ -86,7 +86,7 @@ function bindStoragePicker(){
 function render(){
   const totals=data.totals;
   $('#eligible').textContent=totals.eligible_h;
-  $('#heroText').textContent=`${totals.eligible_files} 个静置子任务符合安全条件；迁移完成后自动释放本地实体。`;
+  $('#heroText').textContent=`${totals.eligible_files} 个静置历史对象符合安全条件；停泊验证完成后才会释放本地实体。`;
   $('#free').textContent=data.disk.free_h;$('#diskBar').style.width=data.disk.used_percent+'%';
   $('#protected').textContent=totals.main_files+' 个';$('#linked').textContent=totals.linked_files+' 个';$('#rollback').textContent=totals.rollback_h;
   const recalled=data.catalog?.recall_sessions||0;
@@ -131,7 +131,7 @@ function taskState(item){
   if(item.linked)return['已停泊','linked'];
   if(item.kind==='main')return['主任务','protected'];
   if(!item.last_turn_complete)return['进行中','active'];
-  if(item.eligible)return[filter==='recommended'?'本次推荐':'可整理','eligible'];
+  if(item.eligible)return[filter==='recommended'?'本次推荐':'可停泊','eligible'];
   return['近期任务','recent'];
 }
 function renderTask(item){
@@ -179,9 +179,9 @@ function renderProjects(){
 }
 function updateSelection(){
   const items=data.sessions.filter(item=>selected.has(item.path)),projects=new Set(items.map(item=>item.project_id||'__standalone__')),linkedMode=filter==='linked';
-  $('#selected').textContent=items.length?`已选 ${items.length} 个任务 · ${projects.size} 个分组`:'未选择任务';
+  $('#selected').textContent=items.length?`已选 ${items.length} 个历史对象 · ${projects.size} 个分组`:'未选择历史';
   $('#selectedSize').textContent=fmt(items.reduce((total,item)=>total+(item.backup_exists?item.backup_bytes:item.logical),0));
-  $('#offload').disabled=operationBusy||!items.length;$('#offload').textContent=operationBusy?'操作进行中…':items.length?(linkedMode?'管理所选':'迁移所选'):(linkedMode?'选择已停泊任务':'选择任务后迁移');
+  $('#offload').disabled=operationBusy||!items.length;$('#offload').textContent=operationBusy?'操作进行中…':items.length?(linkedMode?'管理所选':'停泊所选'):(linkedMode?'选择已停泊历史':'选择历史后停泊');
   $('#optimize').disabled=operationBusy;$('#selectAll').disabled=operationBusy;
 }
 async function post(path,body){const response=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json','X-Harbor-Token':token},body:JSON.stringify(body)});const json=await response.json();if(!response.ok||!json.ok)throw Error(json.error||'操作失败');return json}
@@ -201,14 +201,14 @@ function selectRecommended(){
   filter='recommended';$('#recommendedTab').hidden=false;document.querySelectorAll('[data-filter]').forEach(button=>button.classList.toggle('active',button.dataset.filter==='recommended'));
   renderProjects();updateSelection();return data.sessions.filter(item=>selected.has(item.path));
 }
-async function prepareMigration(items,title='迁移所选任务'){
-  if(operationBusy){toast('已有迁移操作正在进行');return}
+async function prepareMigration(items,title='停泊所选历史'){
+  if(operationBusy){toast('已有停泊操作正在进行');return}
   operationBusy=true;updateSelection();
   try{
     if(!$('#volume').value)throw Error('请先连接并选择一个可写外置盘');
-    if(!items.length)throw Error('请先选择要整理的任务');
+    if(!items.length)throw Error('请先选择要停泊的历史');
     const plan=await post('/api/plan',base(items.map(item=>item.path))),total=plan.results.reduce((sum,item)=>sum+item.bytes,0);
-    const confirmed=await ask(title,`<p>将迁移 <b>${items.length}</b> 个已完成子任务，共 <b>${fmt(total)}</b>。</p><p>每项都会先复制、校验并建立可读取连接；通过后自动删除本地实体并释放空间。</p><label class="backup-option"><input id="keepLocalBackup" type="checkbox"><span><b>同时保留本地备份</b><small>用于额外观察；不会释放这部分内盘空间</small></span></label>`);
+    const confirmed=await ask(title,`<p>将停泊 <b>${items.length}</b> 个已完成历史对象，共 <b>${fmt(total)}</b>。</p><p>每项都会先复制、校验并建立可读取连接；独立复核通过后才释放本地实体。</p><label class="backup-option"><input id="keepLocalBackup" type="checkbox"><span><b>同时保留本地副本</b><small>用于额外观察；不会释放这部分内盘空间</small></span></label>`);
     const keepLocalBackup=Boolean($('#keepLocalBackup')?.checked);
     if(!confirmed)return;
     await executeMigration(items,{keepLocalBackup});
@@ -216,17 +216,17 @@ async function prepareMigration(items,title='迁移所选任务'){
 }
 function setProgress(completed,total,bytes,totalBytes,stage){$('#progressCount').textContent=`${completed} / ${total}`;$('#progressBytes').textContent=`${fmt(bytes)} / ${fmt(totalBytes)}`;$('#progressFill').style.width=(total?completed/total*100:0)+'%';$('#progressStage').textContent=stage}
 async function executeMigration(items,{keepLocalBackup=false}={}){
-  const dialog=$('#progressDialog'),totalBytes=items.reduce((sum,item)=>sum+item.logical,0);$('#progressClose').disabled=true;$('#progressTitle').textContent=keepLocalBackup?'正在备份并停泊':'正在迁移';setProgress(0,items.length,0,totalBytes,'逐条复制、校验并建立可读取连接…');dialog.showModal();
+  const dialog=$('#progressDialog'),totalBytes=items.reduce((sum,item)=>sum+item.logical,0);$('#progressClose').disabled=true;$('#progressTitle').textContent=keepLocalBackup?'正在停泊并保留副本':'正在安全停泊';setProgress(0,items.length,0,totalBytes,'逐条复制、验证并建立连续性连接…');dialog.showModal();
   let completed=0,bytes=0,released=0;
   try{
     for(const item of items){
       setProgress(completed,items.length,bytes,totalBytes,`正在处理 ${item.name}`);
       const response=await post(keepLocalBackup?'/api/offload':'/api/migrate',base([item.path]));
       released+=Number(response.results?.[0]?.bytes_released||0);completed++;bytes+=item.logical;
-      setProgress(completed,items.length,bytes,totalBytes,keepLocalBackup?`已备份 ${completed} 项`:`已迁移并释放 ${completed} 项`);
+      setProgress(completed,items.length,bytes,totalBytes,keepLocalBackup?`已停泊并保留 ${completed} 项`:`已停泊并释放 ${completed} 项`);
     }
-    $('#progressTitle').textContent=keepLocalBackup?'本轮备份完成':'本轮迁移完成';
-    $('#progressStage').textContent=keepLocalBackup?'已保留本地备份；外置盘副本和原路径连接均已校验。':`已释放 ${fmt(released)} 内盘空间；外挂盘在线时 Codex 可沿原路径读取。`;
+    $('#progressTitle').textContent=keepLocalBackup?'本轮停泊完成':'本轮安全停泊完成';
+    $('#progressStage').textContent=keepLocalBackup?'已保留本地副本；外置盘原件和原路径连接均已验证。':`已释放 ${fmt(released)} 内盘空间；外置盘在线时 Codex 可沿原路径读取。`;
     selected.clear();recommended.clear();await refresh();
   }catch(error){$('#progressTitle').textContent='操作已安全停止';$('#progressStage').textContent=`${error.message}；未通过校验的任务不会删除本地文件。`;toast(error.message,true)}
   $('#progressClose').disabled=false;
@@ -239,7 +239,7 @@ $('#clearSearch').onclick=()=>{$('#search').value='';runSearch();$('#search').fo
 $('#sortBy').onchange=()=>{sortBy=$('#sortBy').value;frozenProjectOrder=null;pinnedInView.clear();renderProjects()};
 document.querySelectorAll('[data-filter]').forEach(button=>button.onclick=()=>{document.querySelectorAll('[data-filter]').forEach(item=>item.classList.remove('active'));button.classList.add('active');filter=button.dataset.filter;frozenProjectOrder=null;pinnedInView.clear();if(filter!=='recommended'){selected.clear();recommended.clear();$('#recommendedTab').hidden=true}renderProjects();updateSelection()});
 $('#selectAll').onclick=()=>{const items=selectRecommended();toast(items.length?`已推荐 ${items.length} 个安全候选，可逐项调整`:'暂时没有符合条件的候选')};
-$('#optimize').onclick=async()=>{try{const items=selectRecommended();if(!items.length)throw Error('暂时没有符合 30 天安全条件的已完成子任务');await prepareMigration(items,'一键优化 · 本轮建议')}catch(error){toast(error.message,true)}};
+$('#optimize').onclick=async()=>{try{const items=selectRecommended();if(!items.length)throw Error('暂时没有符合 30 天安全条件的已完成历史');await prepareMigration(items,'查看停泊方案 · 本轮建议')}catch(error){toast(error.message,true)}};
 $('#offload').onclick=async()=>{try{if(filter==='linked'){$('#manageDialog').showModal();return}await prepareMigration(data.sessions.filter(item=>selected.has(item.path)))}catch(error){toast(error.message,true)}};
 $('#progressClose').onclick=()=>$('#progressDialog').close();
 $('#openInCodex').onclick=async()=>{
@@ -255,7 +255,7 @@ $('#openInCodex').onclick=async()=>{
 };
 $('#openParentInCodex').onclick=()=>{if(activeTask?.parent_id)location.href=`codex://threads/${encodeURIComponent(activeTask.parent_id)}`};
 $('#audit').onclick=async()=>{try{const response=await post('/api/audit',{paths:[...selected]});toast(`已校验 ${response.results.length} 项，${response.results.filter(item=>item.verified).length} 项一致`)}catch(error){toast(error.message,true)}};
-$('#restore').onclick=async()=>{try{$('#manageDialog').close();if(!await ask('恢复到内盘','<p>把所选停泊记录恢复为内盘普通文件，外挂副本仍保留。</p>'))return;await post('/api/restore',{paths:[...selected]});selected.clear();toast('已恢复');await refresh()}catch(error){toast(error.message,true)}};
-$('#finalize').onclick=async()=>{try{$('#manageDialog').close();if(!await ask('释放本地回滚','<p>这一步会永久删除本地回滚副本，才真正腾出空间。外挂盘断开时，对应历史将暂时不可读。</p>'))return;await post('/api/finalize',{paths:[...selected],confirmation:'DELETE LOCAL BACKUPS'});selected.clear();toast('本地回滚已释放');await refresh()}catch(error){toast(error.message,true)}};
+$('#restore').onclick=async()=>{try{$('#manageDialog').close();if(!await ask('恢复到本机','<p>把所选停泊历史恢复为内盘普通文件，外置原件仍保留。</p>'))return;await post('/api/restore',{paths:[...selected]});selected.clear();toast('已恢复到本机');await refresh()}catch(error){toast(error.message,true)}};
+$('#finalize').onclick=async()=>{try{$('#manageDialog').close();if(!await ask('释放本地副本','<p>这一步会永久删除单独保留的本地副本，才真正腾出空间。外置盘断开时，对应历史将暂时不可读。</p>'))return;await post('/api/finalize',{paths:[...selected],confirmation:'DELETE LOCAL BACKUPS'});selected.clear();toast('本地副本已释放');await refresh()}catch(error){toast(error.message,true)}};
 
 init().catch(error=>toast(error.message,true));

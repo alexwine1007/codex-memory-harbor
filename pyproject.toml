@@ -1,7 +1,7 @@
 [project]
 name = "memory-harbor"
-version = "0.4.4b1"
-description = "Safely dock and traceably recall old Codex child-task session logs"
+version = "0.4.4b2"
+description = "安全停泊并可追溯召回 Codex 子任务历史证据"
 readme = "README.md"
 requires-python = ">=3.9"
 license = {text = "MIT"}

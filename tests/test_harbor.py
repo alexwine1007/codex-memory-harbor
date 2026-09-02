@@ -45,9 +45,9 @@ class HarborTests(unittest.TestCase):
         self.assertIn("DeepSeek 通常是模型或模型服务提供方", north_star)
         self.assertIn("第二个真实 Runtime Adapter", north_star)
         self.assertIn("runtime-neutral continuity product", contract)
-        self.assertIn("**History Object**", context)
-        self.assertIn("**Native Continuity**", context)
-        self.assertIn("one adapter makes a seam hypothetical; two adapters make it real", runtime_adr)
+        self.assertIn("**History Object（历史对象）**", context)
+        self.assertIn("**Native Continuity（原生连续性）**", context)
+        self.assertIn("一个适配器只能提出假设，两个适配器才能验证边界", runtime_adr)
 
     def test_frontend_foundation_and_handbook_keep_design_and_delivery_separate(self):
         readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
@@ -55,26 +55,51 @@ class HarborTests(unittest.TestCase):
         handbook = (REPO_ROOT / "docs/handbook/README.md").read_text(encoding="utf-8")
         desktop = (REPO_ROOT / "docs/handbook/desktop-and-dashboard.md").read_text(encoding="utf-8")
         self.assertIn("technical handbook", readme)
-        self.assertIn("Status: Draft 0.1", foundation)
-        self.assertIn("continuity health > required attention > evidence", foundation)
-        self.assertIn("Overview", foundation)
-        self.assertIn("History", foundation)
-        self.assertIn("Docking", foundation)
-        self.assertIn("Integrity", foundation)
-        self.assertIn("Connections", foundation)
-        self.assertIn("Activity", foundation)
-        self.assertIn("Avoid `一键优化`", foundation)
-        self.assertIn("Runtime Adapter authoring | Planned", handbook)
-        self.assertIn("The only delivered Runtime Adapter is Codex", handbook)
-        self.assertIn("127.0.0.1, ephemeral port", desktop)
-        self.assertIn("current design debt", desktop.lower())
+        self.assertIn("状态：草案 0.2", foundation)
+        self.assertIn("深空智能港", foundation)
+        for page in ("港口总览", "历史星图", "停泊队列", "完整性核心", "连接矩阵", "证据回执", "系统设置"):
+            self.assertIn(page, foundation)
+        self.assertIn("正式界面不再使用“一键优化”", foundation)
+        self.assertIn("Runtime Adapter 开发 | 规划中", handbook)
+        self.assertIn("唯一已交付的 Runtime Adapter 是 macOS 上的 Codex", handbook)
+        self.assertIn("127.0.0.1，随机可用端口", desktop)
+        self.assertIn("当前设计债务", desktop)
+
+    def test_chinese_scifi_prototype_is_fixture_only_and_interactive(self):
+        prototype = REPO_ROOT / "docs/design/prototype"
+        html = (prototype / "index.html").read_text(encoding="utf-8")
+        css = (prototype / "prototype.css").read_text(encoding="utf-8")
+        javascript = (prototype / "prototype.js").read_text(encoding="utf-8")
+        self.assertIn('lang="zh-CN"', html)
+        self.assertIn("视觉原型 · 中文界面 · 不连接真实数据与迁移操作", html)
+        self.assertIn("连续性核心在线", html)
+        for page in ("港口总览", "历史星图", "停泊队列", "完整性核心", "连接矩阵", "证据回执", "系统设置"):
+            self.assertIn(page, html)
+        self.assertIn("prefers-reduced-motion", css)
+        self.assertIn("event.metaKey || event.ctrlKey", javascript)
+        self.assertIn("evidenceDrawer", javascript)
+        self.assertNotIn("fetch(", html + javascript)
+
+    def test_skill_and_user_visible_errors_default_to_chinese(self):
+        skill = (REPO_ROOT / "skills/codex-memory-harbor/SKILL.md").read_text(encoding="utf-8")
+        agent = (REPO_ROOT / "skills/codex-memory-harbor/agents/openai.yaml").read_text(encoding="utf-8")
+        source = SCRIPT.read_text(encoding="utf-8")
+        self.assertIn("## 中文交付合同", skill)
+        self.assertIn("查看停泊方案", skill)
+        self.assertIn("打开中文仪表盘", agent)
+        self.assertIn('print(f"错误 [{code}]：{message}"', source)
+        self.assertNotIn('HarborError("External volume is not mounted', source)
+        self.assertEqual(harbor.user_error(PermissionError("raw english")), ("permission_denied", "没有权限访问所需文件或存储设备"))
+        self.assertEqual(harbor.user_error(FileNotFoundError("raw english")), ("file_unavailable", "所需文件或存储位置当前不可用"))
+        with self.assertRaisesRegex(harbor.HarborError, "外置存储必须挂载在 /Volumes 下"):
+            harbor.mounted_volume("/tmp")
 
     def test_public_project_name_is_memory_harbor(self):
         metadata = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
         readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
         self.assertIn('name = "memory-harbor"', metadata)
-        self.assertIn('version = "0.4.4b1"', metadata)
-        self.assertEqual(harbor.VERSION, "0.4.4-beta.1")
+        self.assertIn('version = "0.4.4b2"', metadata)
+        self.assertEqual(harbor.VERSION, "0.4.4-beta.2")
         self.assertEqual(readme.splitlines()[0], "# Memory Harbor")
         self.assertIn("canonical checkout directory is `memory-harbor`", readme)
         self.assertIn("`codex-memory-harbor` compatibility symlink", readme)
@@ -112,6 +137,9 @@ class HarborTests(unittest.TestCase):
         self.assertIn('CFBundleIconFile string MemoryHarbor', build)
         self.assertIn('MemoryHarbor.icns" "$HELPER/Contents/Resources', build)
         self.assertIn('$SKILL_DEST/scripts/harbor.py serve', install)
+        self.assertIn('NSRemovableVolumesUsageDescription string Memory Harbor 需要访问你选择的存储设备', build)
+        self.assertIn('CompactCardView.label("历史可访问"', owner)
+        self.assertIn('NSButton(title: "打开港口"', owner)
 
     def test_dashboard_server_can_bind_an_ephemeral_port(self):
         with tempfile.TemporaryDirectory() as d:
@@ -226,13 +254,19 @@ print(json.dumps({'pid': child.pid, 'url': payload['url']}), flush=True)
             "totals":{"eligible_h":"2 GB","eligible_files":3},
             "disk":{"free_h":"9 GB"},
             "volumes":[{"writable":True,"name":"Archive","free_h":"80 GB"}],
-            "sessions":[{"private":"must not escape"}],
+            "sessions":[
+                {"private":"must not escape","linked":True,"target_exists":True},
+                {"linked":True,"target_exists":False},
+                {"linked":False,"target_exists":True},
+            ],
         }
         with mock.patch.object(harbor,"load_config",return_value={"protected_projects":[],"protected_sessions":[]}), \
              mock.patch.object(harbor,"scan",return_value=snapshot):
             result=harbor.compact_summary(Path("/tmp/codex"))
         self.assertEqual(result["eligible_h"],"2 GB")
         self.assertEqual(result["volume_name"],"Archive")
+        self.assertEqual(result["docked_files"],2)
+        self.assertEqual(result["docked_available"],1)
         self.assertNotIn("sessions",result)
     def test_volume_identity_reads_persistent_diskutil_uuid(self):
         payload=plistlib.dumps({"VolumeUUID":"ABC-123","DeviceIdentifier":"disk9s1","FilesystemType":"exfat"})

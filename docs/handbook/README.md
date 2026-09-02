@@ -1,66 +1,61 @@
-# Memory Harbor Technical Handbook
+# Memory Harbor 技术手册
 
-- Status: In progress
-- Started: 2026-09-03
+- 状态：持续编写
+- 启动日期：2026-09-03
+- 默认语言：简体中文
 
-This handbook is the technical entry point for building, auditing, extending, packaging,
-and recovering Memory Harbor. It distinguishes current implementation evidence from target
-architecture. A document marked draft is not a shipped capability.
+本手册是 Memory Harbor 的技术入口，覆盖构建、审计、扩展、打包与恢复。它会严格区分当前实现证据与目标架构；标记为“草案”或“规划中”的内容不代表能力已经交付。
 
-## Reading order
+## 推荐阅读顺序
 
-1. [Product north star](../../PRODUCT_NORTH_STAR.zh-CN.md) — why the product exists and how
-   it is judged.
-2. [Domain language](../../CONTEXT.md) — canonical Runtime, history, docking, continuity,
-   adapter, recall, and receipt terms.
-3. [Runtime-neutral core decision](../adr/0001-runtime-neutral-core.md) — why Runtime and
-   Storage Adapter seams exist.
-4. [Current desktop and dashboard](desktop-and-dashboard.md) — how the 0.4.4 beta actually
-   runs today.
-5. [Recall architecture](../RECALL_ARCHITECTURE.md) — thin-local / thick-external indexing
-   and evidence retrieval.
-6. [Tested boundaries](../../skills/codex-memory-harbor/references/tested-boundaries.md) —
-   the evidence behind current support claims.
-7. [Frontend foundation](../design/FRONTEND_FOUNDATION.md) — target information architecture,
-   design system, state model, and UI verification plan.
+1. [产品北极星](../../PRODUCT_NORTH_STAR.zh-CN.md)——产品为何存在，以及如何验收。
+2. [领域语言](../../CONTEXT.md)——Runtime、历史对象、停泊、连续性、适配器、召回与回执的统一术语。
+3. [ADR 0001：运行时中立核心](../adr/0001-runtime-neutral-core.md)——为何需要 Runtime Adapter 与 Storage Adapter 两条明确边界。
+4. [当前桌面端与仪表盘](desktop-and-dashboard.md)——0.4.4 beta 当前真实运行方式。
+5. [召回架构](../RECALL_ARCHITECTURE.md)——本地轻索引、外部原始证据与关联召回方向。
+6. [已测试边界](../../skills/codex-memory-harbor/references/tested-boundaries.md)——当前支持声明背后的证据。
+7. [前端设计基础](../design/FRONTEND_FOUNDATION.md)——中文“深空智能港”的信息架构、设计系统、状态模型与验证方案。
+8. [中文交互原型](../design/prototype/index.html)——完全使用静态样例数据，不连接真实迁移接口。
 
-## Handbook map
+## 手册地图
 
-| Chapter | Status | Purpose |
+| 章节 | 成熟度 | 用途 |
 | --- | --- | --- |
-| Product north star | Draft 0.2 | product direction and acceptance metrics |
-| Domain language | Current | stable vocabulary without implementation detail |
-| ADR 0001 | Accepted | runtime-neutral core and adapter seams |
-| Desktop and dashboard | Current 0.4.4 | process topology, local interface, lifecycle, and known debt |
-| Recall architecture | Current plus roadmap | local discovery, evidence fragments, and associative recall direction |
-| Tested boundaries | Evidence ledger | verified and unverified environment claims |
-| Frontend foundation | Draft 0.1 | target experience and implementation slices |
-| Docking transaction | Planned | durable write, verification, link/materialization, rollback, and recovery |
-| Manifest and receipts | Planned | schemas, compatibility, provenance, and export |
-| Runtime Adapter authoring | Planned | history discovery, liveness, capabilities, and conformance suite |
-| Storage Adapter authoring | Planned | persistence, identity, availability, materialization, and credentials |
-| Installation and upgrade | Planned | supported platforms, signing, permissions, migration, and rollback |
-| Testing and release | Planned | fixtures, fault injection, performance gates, packaging, and promotion |
+| 产品北极星 | 草案 0.2 | 产品方向与验收指标 |
+| 领域语言 | 当前 | 不依赖实现细节的稳定词汇 |
+| ADR 0001 | 已接受 | 运行时中立核心与适配器边界 |
+| 桌面端与仪表盘 | 当前 0.4.4 | 进程拓扑、本地接口、生命周期与已知债务 |
+| 召回架构 | 当前能力 + 路线图 | 本地发现、证据片段与关联召回方向 |
+| 已测试边界 | 证据账本 | 已验证与未验证的环境声明 |
+| 前端设计基础 | 草案 0.2 | 目标体验、中文语言合同与交付切片 |
+| 停泊事务 | 规划中 | 持久化写入、校验、链接或物化、回滚与恢复 |
+| 清单与证据回执 | 规划中 | 数据格式、兼容性、出处与导出 |
+| Runtime Adapter 开发 | 规划中 | 历史发现、活跃性、能力矩阵与一致性测试 |
+| Storage Adapter 开发 | 规划中 | 持久化、身份、在线状态、物化与凭据边界 |
+| 安装与升级 | 规划中 | 支持平台、签名、权限、迁移与回滚 |
+| 测试与发布 | 规划中 | 样例、故障注入、性能门槛、打包与发布 |
 
-Planned rows describe the documentation backlog. They are not empty files and do not imply
-that the underlying capability exists.
+“规划中”描述的是文档与实现待办，不表示对应能力已经存在。
 
-## Documentation rules
+## 语言合同
 
-- Lead each technical chapter with `Status`, `Applies to`, and `Last verified`.
-- Separate current behavior, target behavior, and tested evidence.
-- Link a support claim to a repeatable command, test, or evidence ledger entry.
-- Do not copy dated benchmark numbers into undated prose.
-- Never include credentials, browser state, private conversation text, or real secret values.
-- Use the canonical language in `CONTEXT.md`; introduce new domain terms there first.
-- Update the handbook in the same commit as an interface or safety-contract change.
-- Keep vendor-specific details in adapter chapters rather than leaking them into the core
-  contract.
+- 面向 Alex 的界面、产品说明、手册入口、Skill 指令与错误说明默认使用简体中文。
+- Runtime Adapter、Storage Adapter、SHA-256、fsync 等必要技术词可以保留英文，但首次出现时必须用中文解释其作用。
+- API 路径、JSON 字段、代码标识符和协议常量保持稳定，不为了翻译破坏兼容性。
+- 原始英文异常不得直接暴露给用户；应转换成中文状态、原因和下一步操作。
+- “备份”“迁移”“停泊”“释放本地副本”“恢复”不得混用。
 
-## Current scope
+## 文档规则
 
-The only delivered Runtime Adapter is Codex on macOS. The only delivered Storage Adapter is
-an attached external volume. The handbook is designed to grow toward additional runtimes
-and storage backends, but it must not describe Claude Code, OpenClaw, DeepSeek-related
-harnesses, network storage, or cloud storage as shipped before their own conformance and
-recovery evidence exists.
+- 每篇技术章节先写明“状态”“适用版本”“最后验证日期”。
+- 明确分开当前行为、目标行为与测试证据。
+- 每项支持声明都应指向可重复运行的命令、测试或证据账本。
+- 不把带日期的性能数字复制进无日期的长期说明。
+- 不记录凭据、浏览器状态、私人对话正文或真实密钥。
+- 使用 `CONTEXT.md` 中的统一术语；新增领域词先进入该文件。
+- 接口或安全合同变化时，同一 commit 必须更新手册。
+- Runtime 特有细节留在对应适配器章节，不泄漏进核心合同。
+
+## 当前范围
+
+目前唯一已交付的 Runtime Adapter 是 macOS 上的 Codex，唯一已交付的 Storage Adapter 是已连接的外置卷。产品架构面向更多通用 Agent Runtime 与 Harness，但在完成各自的一致性测试和恢复证据之前，不会把 Claude Code、OpenClaw、DeepSeek 相关 Harness、网络存储或云存储写成已经支持。
