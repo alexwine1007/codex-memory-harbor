@@ -22,4 +22,11 @@
 - From a different active Codex task, Codex loaded all four offloaded tasks by task id while each reported `notLoaded`, and returned an older turn from each. This verifies cross-task, on-demand reads for the small batch.
 - Restart and volume-remount verification for this four-task batch remains pending. The earlier one-task pilot is still the only batch with both checks completed.
 
+## Old multi-agent child-task viewing, 2026-09-03
+
+- Two migrated multi-agent v2 child tasks could still be read by `thread/read`, but Codex desktop failed when their deep links attempted `thread/resume`. Codex logged: `cannot resume an unloaded multi-agent v2 sub-agent through its parent; resume the parent first, or use thread/read to inspect it`.
+- This is a Codex child-task hydration boundary, not evidence of external-drive, symlink, or checksum failure.
+- Memory Harbor 0.2.3-beta.1 detects these sub-agent records, removes the misleading direct-open action, and instead exposes their task-specific outward reports on demand while excluding inherited parent history and raw tool output.
+- On the two affected tasks, the in-app record view recovered the correct task identities (`ep03 evidence audit`, `ep04 starter audit`) and their final reports from the external targets. Ordinary user tasks retain the direct Codex-open action; sub-agent records provide an action to open the owning parent task.
+
 Do not describe unverified cases as supported. Preserve rollback copies until the local machine passes its own restart and remount checks.

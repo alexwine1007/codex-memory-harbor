@@ -5,6 +5,7 @@ let sortBy='size';
 let frozenProjectOrder=null;
 let config={protected_projects:[],protected_sessions:[]};
 let activeTaskId='';
+let activeTask=null;
 const selected=new Set();
 const recommended=new Set();
 const pinnedInView=new Set();
@@ -103,10 +104,14 @@ function formatDate(value){if(!value)return'未知';const date=new Date(value);r
 async function showTaskDetail(id){
   if(!id)return;
   try{
-    const response=await post('/api/task-detail',{id});const task=response.task;activeTaskId=task.id;
+    const response=await post('/api/task-detail',{id});const task=response.task;activeTask=task;activeTaskId=task.id;
     $('#taskDetailTitle').textContent=task.title||'未命名任务';
-    $('#taskDetailPreview').textContent=task.preview||'这项任务没有可用的短预览，可以直接在 Codex 中打开查看。';
+    $('#taskDetailPreview').textContent=task.preview||(task.is_subagent?'这是从所属主任务拆出的后台协作任务，可在下方按需查看它的工作汇报。':'这项任务没有可用的短预览，可以直接在 Codex 中打开查看。');
     $('#taskDetailMeta').innerHTML=`<div><span>最近更新</span><b>${esc(formatDate(task.updated_at_ms))}</b></div><div><span>${task.agent_nickname?'子代理':'创建时间'}</span><b>${esc(task.agent_nickname||formatDate(task.created_at_ms))}</b></div><div><span>工作目录</span><b>${esc(task.cwd||'未记录')}</b></div><div><span>任务编号</span><b>${esc(task.id)}</b></div>`;
+    $('#taskRecord').hidden=true;$('#taskRecordMessages').innerHTML='';$('#taskRecordCount').textContent='';
+    $('#openParentInCodex').hidden=!task.is_subagent;
+    $('#openInCodex').textContent=task.is_subagent?'查看任务记录':'在 Codex 中打开';
+    $('#taskDetailHint').textContent=task.is_subagent?'旧版多代理子任务无法被 Codex 单独恢复；记忆港可按需读取子代理对外汇报，不展开工具原始输出。':'这里只读取 Codex 已生成的标题和短预览，不扫描完整对话正文。';
     $('#taskDialog').showModal();
   }catch(error){toast(error.message,true)}
 }
@@ -179,7 +184,18 @@ $('#selectAll').onclick=()=>{const items=selectRecommended();toast(items.length?
 $('#optimize').onclick=async()=>{try{const items=selectRecommended();if(!items.length)throw Error('暂时没有符合 30 天安全条件的已完成子任务');await prepareMigration(items,'一键优化 · 本轮建议')}catch(error){toast(error.message,true)}};
 $('#offload').onclick=async()=>{try{if(filter==='linked'){$('#manageDialog').showModal();return}await prepareMigration(data.sessions.filter(item=>selected.has(item.path)))}catch(error){toast(error.message,true)}};
 $('#progressClose').onclick=()=>$('#progressDialog').close();
-$('#openInCodex').onclick=()=>{if(activeTaskId)location.href=`codex://threads/${encodeURIComponent(activeTaskId)}`};
+$('#openInCodex').onclick=async()=>{
+  if(!activeTaskId)return;
+  if(!activeTask?.is_subagent){location.href=`codex://threads/${encodeURIComponent(activeTaskId)}`;return}
+  const button=$('#openInCodex');button.disabled=true;button.textContent='读取中…';
+  try{
+    const response=await post('/api/task-record',{id:activeTaskId}),record=response.record;
+    $('#taskRecordCount').textContent=`${record.messages.length} 条`;
+    $('#taskRecordMessages').innerHTML=record.messages.length?record.messages.map((item,index)=>`<article><span>${index===record.messages.length-1?'最终汇报':'进度记录'}${item.timestamp?` · ${esc(formatDate(item.timestamp))}`:''}</span><p>${esc(item.message)}</p></article>`).join(''):'<div class="record-empty">这个子任务没有留下可展示的对外汇报。</div>';
+    $('#taskRecord').hidden=false;$('#taskRecord').scrollIntoView({behavior:'smooth',block:'nearest'});button.textContent='已展开记录';
+  }catch(error){toast(error.message,true);button.textContent='查看任务记录'}finally{button.disabled=false}
+};
+$('#openParentInCodex').onclick=()=>{if(activeTask?.parent_id)location.href=`codex://threads/${encodeURIComponent(activeTask.parent_id)}`};
 $('#audit').onclick=async()=>{try{const response=await post('/api/audit',{paths:[...selected]});toast(`已校验 ${response.results.length} 项，${response.results.filter(item=>item.verified).length} 项一致`)}catch(error){toast(error.message,true)}};
 $('#restore').onclick=async()=>{try{$('#manageDialog').close();if(!await ask('恢复到内盘','<p>把所选停泊记录恢复为内盘普通文件，外挂副本仍保留。</p>'))return;await post('/api/restore',{paths:[...selected]});selected.clear();toast('已恢复');await refresh()}catch(error){toast(error.message,true)}};
 $('#finalize').onclick=async()=>{try{$('#manageDialog').close();if(!await ask('释放本地回滚','<p>这一步会永久删除本地回滚副本，才真正腾出空间。外挂盘断开时，对应历史将暂时不可读。</p>'))return;await post('/api/finalize',{paths:[...selected],confirmation:'DELETE LOCAL BACKUPS'});selected.clear();toast('本地回滚已释放');await refresh()}catch(error){toast(error.message,true)}};

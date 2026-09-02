@@ -72,6 +72,27 @@ class HarborTests(unittest.TestCase):
             detail=harbor.thread_detail(root,"child-1")
             self.assertEqual(detail["preview"],"Private preview")
             self.assertEqual(detail["agent_nickname"],"Gauss")
+
+    def test_subagent_record_excludes_inherited_parent_history(self):
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d); path=root/"sessions/2026/01/01/rollout-child-1.jsonl"; path.parent.mkdir(parents=True)
+            rows=[
+                {"type":"session_meta","payload":{"id":"child-1","parent_thread_id":"parent-1","cwd":"/tmp/example","agent_path":"/root/audit","agent_nickname":"Gauss"}},
+                {"type":"event_msg","payload":{"type":"agent_message","message":"inherited parent text"}},
+                {"type":"response_item","payload":{"type":"agent_message","recipient":"/root/audit","content":[{"type":"input_text","text":"Message Type: NEW_TASK"}]}},
+                {"timestamp":"2026-01-01T00:01:00Z","type":"event_msg","payload":{"type":"agent_message","message":"child progress"}},
+                {"timestamp":"2026-01-01T00:02:00Z","type":"event_msg","payload":{"type":"agent_message","message":"child final"}},
+                {"type":"event_msg","payload":{"type":"task_complete"}},
+            ]
+            path.write_text("\n".join(json.dumps(row) for row in rows)+"\n")
+            database=root/"state_5.sqlite"
+            with sqlite3.connect(database) as connection:
+                connection.execute("CREATE TABLE threads (id TEXT, rollout_path TEXT, title TEXT, preview TEXT, cwd TEXT, created_at INTEGER, updated_at INTEGER, created_at_ms INTEGER, updated_at_ms INTEGER, agent_nickname TEXT)")
+                connection.execute("INSERT INTO threads VALUES (?,?,?,?,?,?,?,?,?,?)",("child-1",str(path),"hello","Preview","/tmp/example",1,2,None,None,"Gauss"))
+            record=harbor.task_record(root,"child-1")
+            self.assertEqual([item["message"] for item in record["messages"]],["child progress","child final"])
+            self.assertEqual(record["title"],"audit")
+            self.assertEqual(record["parent_id"],"parent-1")
     def test_delegation_title_is_compacted_to_its_first_sentence(self):
         value="<codex_delegation><source_thread_id>abc</source_thread_id><input>这是 EP04 的正式制作任务。继续读取许多内部说明。</input></codex_delegation>"
         self.assertEqual(harbor.compact_task_title(value),"EP04 的正式制作任务")

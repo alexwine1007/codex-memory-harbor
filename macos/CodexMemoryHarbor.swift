@@ -133,7 +133,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         guard let url = navigationAction.request.url else { decisionHandler(.allow); return }
         if url.scheme == "codex" {
-            NSWorkspace.shared.open(url)
+            openCodex(url)
             decisionHandler(.cancel)
             return
         }
@@ -161,6 +161,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             webView.load(URLRequest(url: URL(string: "http://127.0.0.1:\(port)/widget.html")!))
         }
         decisionHandler(.cancel)
+    }
+
+    private func openCodex(_ url: URL) {
+        guard let applicationURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.openai.codex") else {
+            showError("未找到 Codex 桌面应用。")
+            return
+        }
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = true
+        NSWorkspace.shared.open([url], withApplicationAt: applicationURL, configuration: configuration) { [weak self] _, error in
+            guard let error else { return }
+            DispatchQueue.main.async { self?.showError("无法打开 Codex 任务：\(error.localizedDescription)") }
+        }
     }
 
     private func buildMenu() {

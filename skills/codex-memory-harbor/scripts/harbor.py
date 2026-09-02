@@ -21,9 +21,10 @@ import time
 import urllib.parse
 import webbrowser
 import re
+from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "0.2.2-beta.1"
+VERSION = "0.2.3-beta.1"
 DEFAULT_ARCHIVE = "Codex Memory Harbor"
 
 
@@ -84,11 +85,16 @@ def first_metadata(path: Path) -> dict:
         raw = stream.readline()
     data = json.loads(raw)
     payload = data.get("payload") or {}
+    source = payload.get("source") or {}
+    spawn = source.get("subagent", {}).get("thread_spawn", {}) if isinstance(source, dict) else {}
     return {
         "id": payload.get("id"),
         "parent_thread_id": payload.get("parent_thread_id"),
         "cwd": payload.get("cwd"),
         "timestamp": payload.get("timestamp"),
+        "thread_source": payload.get("thread_source"),
+        "agent_nickname": payload.get("agent_nickname") or spawn.get("agent_nickname"),
+        "agent_path": payload.get("agent_path") or spawn.get("agent_path"),
     }
 
 
@@ -267,6 +273,11 @@ def compact_task_title(value: str | None) -> str:
     return clean_index_text(sentence, 72).rstrip("。！？!? ")
 
 
+def agent_task_title(agent_path: str | None) -> str:
+    leaf = str(agent_path or "").strip().rstrip("/").split("/")[-1]
+    return clean_index_text(leaf.replace("_", " ").replace("-", " "), 72)
+
+
 def load_thread_catalog(codex_home: Path) -> dict:
     """Load display titles from Codex's index without reading session bodies."""
     database = state_database(codex_home)
@@ -288,7 +299,28 @@ def load_thread_catalog(codex_home: Path) -> dict:
 
 def attach_thread_title(item: dict, catalog: dict) -> None:
     thread = catalog["by_id"].get(str(item.get("id") or "")) or catalog["by_path"].get(str(Path(item["path"]).absolute()))
-    item["title"] = thread["title"] if thread and thread.get("title") else None
+    indexed = thread["title"] if thread and thread.get("title") else None
+    generic = indexed and indexed.strip().lower() in {"hello", "hi", "你好"}
+    item["title"] = agent_task_title(item.get("agent_path")) if generic and item.get("agent_path") else indexed
+
+
+def indexed_rollout_path(codex_home: Path, thread_id: str, rollout_value: str | None) -> Path:
+    candidate = Path(str(rollout_value or "")).expanduser().absolute()
+    if rollout_value:
+        try:
+            lexical_session(str(candidate), codex_home)
+            if candidate.exists() or candidate.is_symlink():
+                if first_metadata(candidate).get("id") == thread_id:
+                    return candidate
+        except (HarborError, OSError, ValueError, json.JSONDecodeError):
+            pass
+    for path in (codex_home / "sessions").rglob(f"*{thread_id}*.jsonl"):
+        try:
+            if first_metadata(path).get("id") == thread_id:
+                return path
+        except (OSError, ValueError, json.JSONDecodeError):
+            continue
+    raise HarborError("Task record file is unavailable")
 
 
 def thread_detail(codex_home: Path, thread_id: str) -> dict:
@@ -309,13 +341,65 @@ def thread_detail(codex_home: Path, thread_id: str) -> dict:
         raise HarborError("Unable to read the Codex task index") from exc
     if not row:
         raise HarborError("Task is not present in the Codex index")
+    rollout_path = indexed_rollout_path(codex_home, thread_id, row["rollout_path"])
+    metadata = first_metadata(rollout_path)
     created = row["created_at_ms"] or ((row["created_at"] or 0) * 1000)
     updated = row["updated_at_ms"] or ((row["updated_at"] or 0) * 1000)
+    indexed_title = compact_task_title(row["title"])
+    if indexed_title.strip().lower() in {"hello", "hi", "你好"} and metadata.get("agent_path"):
+        indexed_title = agent_task_title(metadata["agent_path"])
+    preview = clean_index_text(row["preview"], 520)
+    if metadata.get("parent_thread_id") and preview.strip().lower() in {"hello", "hi", "你好"}:
+        preview = ""
     return {
-        "id": str(row["id"]), "title": compact_task_title(row["title"]) or "未命名任务",
-        "preview": clean_index_text(row["preview"], 520), "cwd": str(row["cwd"] or ""),
-        "rollout_path": str(row["rollout_path"] or ""), "created_at_ms": int(created or 0),
-        "updated_at_ms": int(updated or 0), "agent_nickname": str(row["agent_nickname"] or "").strip(),
+        "id": str(row["id"]), "title": indexed_title or "未命名任务",
+        "preview": preview, "cwd": str(row["cwd"] or ""),
+        "rollout_path": str(rollout_path), "created_at_ms": int(created or 0),
+        "updated_at_ms": int(updated or 0), "agent_nickname": str(row["agent_nickname"] or metadata.get("agent_nickname") or "").strip(),
+        "parent_id": str(metadata.get("parent_thread_id") or ""),
+        "agent_path": str(metadata.get("agent_path") or ""),
+        "is_subagent": bool(metadata.get("parent_thread_id")),
+    }
+
+
+def task_record(codex_home: Path, thread_id: str, maximum_messages: int = 80) -> dict:
+    """Read one requested sub-agent's visible status messages, excluding inherited parent history."""
+    detail = thread_detail(codex_home, thread_id)
+    if not detail["is_subagent"]:
+        raise HarborError("This task opens directly in Codex")
+    path = Path(detail["rollout_path"])
+    agent_path = detail["agent_path"]
+    started = False
+    messages: deque[dict] = deque(maxlen=maximum_messages)
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as stream:
+            for line in stream:
+                try:
+                    value = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                payload = value.get("payload") or {}
+                if not started and value.get("type") == "response_item" and payload.get("type") == "agent_message":
+                    recipient = str(payload.get("recipient") or "")
+                    content = payload.get("content") or []
+                    marker = " ".join(str(part.get("text") or "") for part in content if isinstance(part, dict))
+                    if recipient == agent_path and "Message Type: NEW_TASK" in marker:
+                        started = True
+                    continue
+                if not started or value.get("type") != "event_msg" or payload.get("type") != "agent_message":
+                    continue
+                message = str(payload.get("message") or "").strip()
+                if message:
+                    messages.append({"timestamp": value.get("timestamp"), "message": message[:12000]})
+    except OSError as exc:
+        raise HarborError("Unable to read the task record") from exc
+    return {
+        "id": thread_id,
+        "title": detail["title"],
+        "agent_nickname": detail["agent_nickname"],
+        "parent_id": detail["parent_id"],
+        "messages": list(messages),
+        "truncated": len(messages) == maximum_messages,
     }
 
 
@@ -363,7 +447,7 @@ def session_record(path: Path, min_age: float, priority=None, protected_sessions
         meta = first_metadata(path)
         error = None
     except Exception as exc:
-        meta = {"id": None, "parent_thread_id": None, "cwd": None, "timestamp": None}
+        meta = {"id": None, "parent_thread_id": None, "cwd": None, "timestamp": None, "thread_source": None, "agent_nickname": None, "agent_path": None}
         error = str(exc)
     try:
         logical = path.stat().st_size
@@ -393,6 +477,7 @@ def session_record(path: Path, min_age: float, priority=None, protected_sessions
         reasons.append("protected_session")
     return {
         "path": str(path), "name": path.name, "id": meta.get("id"), "parent_id": meta.get("parent_thread_id"),
+        "thread_source": meta.get("thread_source"), "agent_nickname": meta.get("agent_nickname"), "agent_path": meta.get("agent_path"),
         "cwd": meta.get("cwd") or "", "timestamp": meta.get("timestamp"), "kind": kind, "logical": logical, "logical_h": human_bytes(logical),
         "local_allocated": local_allocated(path), "local_allocated_h": human_bytes(local_allocated(path)),
         "age_days": round(age, 1), "last_turn_complete": completed, "linked": linked,
@@ -571,6 +656,8 @@ class HarborHandler(BaseHTTPRequestHandler):
                 return self.send_json(200, {"ok": True, "settings": saved})
             if self.path == "/api/task-detail":
                 return self.send_json(200, {"ok": True, "task": thread_detail(self.app["codex_home"], str(data.get("id") or ""))})
+            if self.path == "/api/task-record":
+                return self.send_json(200, {"ok": True, "record": task_record(self.app["codex_home"], str(data.get("id") or ""))})
             paths = data.get("paths") or []
             if not paths: raise HarborError("No sessions selected")
             results = []
