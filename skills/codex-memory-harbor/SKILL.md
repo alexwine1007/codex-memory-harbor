@@ -16,7 +16,7 @@ Treat Codex session JSONL as recovery and audit evidence, not cache.
 ## Safety contract
 
 - Never offload main-task logs, the current task, a file with open handles, a session whose last turn is not complete, or a session inside the configured priority project.
-- Default to 14 days minimum age and dry-run mutations first.
+- Default to 30 days minimum age and dry-run mutations first. Time makes a session eligible; user-pinned projects or individual sessions always override time.
 - Copy, size-check, and SHA-256-check before replacing the source with an absolute symlink.
 - Keep `.offload-local-backup` until the user has verified Codex cold-reading and, preferably, a full restart plus drive remount.
 - Finalization is the only step that reclaims the rollback copy. Require explicit authorization immediately before it.

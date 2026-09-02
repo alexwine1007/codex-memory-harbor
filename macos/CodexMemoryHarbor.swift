@@ -65,6 +65,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
     private func setWindowChrome(hidden: Bool) {
         window.titleVisibility = hidden ? .hidden : .visible
         window.titlebarAppearsTransparent = hidden
+        window.hasShadow = !hidden
         window.standardWindowButton(.closeButton)?.isHidden = hidden
         window.standardWindowButton(.miniaturizeButton)?.isHidden = hidden
         window.standardWindowButton(.zoomButton)?.isHidden = hidden

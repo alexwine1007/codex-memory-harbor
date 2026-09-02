@@ -56,11 +56,22 @@ It is intentionally not advertised as a native WidgetKit extension. Registering 
 
 - Main task logs are never eligible.
 - The current task and open files are never eligible.
-- Logs newer than the configured minimum age are never eligible.
-- A configured priority project is excluded.
+- Logs newer than the configured minimum age (30 days by default) are never eligible.
+- Users can star whole projects or individual important sessions for permanent local retention; those pins override age.
 - Batch operations stop on the first failure.
 - “Offloaded” does not mean internal space was reclaimed while a local rollback exists.
 - If the external drive is unavailable, links are visibly reported as unavailable.
+
+### Retention model
+
+Eligibility is the intersection of machine safety and user intent:
+
+```text
+old enough AND child task AND last turn complete AND not open
+AND project not starred AND session not starred
+```
+
+The 30-day threshold is only a conservative default. A star on an important project or individual session wins over time and keeps it local indefinitely. No personal project name or path is built into the public repository.
 
 See [tested-boundaries.md](skills/codex-memory-harbor/references/tested-boundaries.md) for the exact evidence behind the current beta label.
 

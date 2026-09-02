@@ -34,6 +34,11 @@ class HarborTests(unittest.TestCase):
             root=Path(d); p=self.fixture(root)
             item=harbor.session_record(p,14,"/tmp")
             self.assertFalse(item["eligible"]); self.assertIn("priority_project",item["reasons"])
+    def test_individual_session_pin_overrides_age(self):
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d); p=self.fixture(root)
+            item=harbor.session_record(p,14,None,["child-1"])
+            self.assertFalse(item["eligible"]); self.assertIn("protected_session",item["reasons"])
     def test_offload_audit_finalize_restore_cycle(self):
         with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as v:
             root=Path(d); p=self.fixture(root); volume=Path(v)

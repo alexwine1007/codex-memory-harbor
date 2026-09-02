@@ -20,7 +20,7 @@ import urllib.parse
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "0.1.0-beta.1"
+VERSION = "0.1.1-beta.1"
 DEFAULT_ARCHIVE = "Codex Memory Harbor"
 
 
@@ -35,18 +35,25 @@ def config_path() -> Path:
 def load_config() -> dict:
     path = config_path()
     if not path.is_file():
-        return {"priority": ""}
+        return {"protected_projects": [], "protected_sessions": []}
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
-        return {"priority": str(value.get("priority") or "")}
+        projects = value.get("protected_projects") or ([value["priority"]] if value.get("priority") else [])
+        return {"protected_projects": [str(item) for item in projects if item], "protected_sessions": [str(item) for item in value.get("protected_sessions", []) if item]}
     except (OSError, ValueError, json.JSONDecodeError):
-        return {"priority": ""}
+        return {"protected_projects": [], "protected_sessions": []}
 
 
-def save_config(priority: str) -> dict:
+def parse_projects(value) -> list[str]:
+    if isinstance(value, list):
+        return list(dict.fromkeys(str(item).strip() for item in value if str(item).strip()))
+    return list(dict.fromkeys(item.strip() for line in str(value or "").splitlines() for item in line.split(",") if item.strip()))
+
+
+def save_config(protected_projects, protected_sessions=None) -> dict:
     path = config_path(); path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(path.name + ".tmp")
-    value = {"priority": priority.strip(), "updated_at": int(time.time())}
+    value = {"protected_projects": parse_projects(protected_projects), "protected_sessions": sorted(set(protected_sessions or [])), "updated_at": int(time.time())}
     temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     os.replace(temporary, path)
     return value
@@ -117,14 +124,16 @@ def open_handles(path: Path) -> int:
     return max(0, len(rows) - 1)
 
 
-def is_priority(cwd: str | None, priority: str | None) -> bool:
+def is_priority(cwd: str | None, priority) -> bool:
     if not cwd or not priority:
         return False
-    try:
-        Path(cwd).expanduser().resolve().relative_to(Path(priority).expanduser().resolve())
-        return True
-    except (ValueError, OSError):
-        return False
+    for protected in parse_projects(priority):
+        try:
+            Path(cwd).expanduser().resolve().relative_to(Path(protected).expanduser().resolve())
+            return True
+        except (ValueError, OSError):
+            continue
+    return False
 
 
 def lexical_session(path_value: str, codex_home: Path) -> tuple[Path, Path]:
@@ -165,7 +174,7 @@ def available_volumes() -> list[dict]:
     return result
 
 
-def session_record(path: Path, min_age: float, priority: str | None) -> dict:
+def session_record(path: Path, min_age: float, priority=None, protected_sessions=None) -> dict:
     linked = path.is_symlink()
     target = Path(os.readlink(path)) if linked else None
     target_exists = bool(target and target.is_file())
@@ -196,8 +205,12 @@ def session_record(path: Path, min_age: float, priority: str | None) -> dict:
         reasons.append("too_new")
     if not completed:
         reasons.append("last_turn_incomplete")
-    if is_priority(meta.get("cwd"), priority):
+    project_protected = is_priority(meta.get("cwd"), priority)
+    if project_protected:
         reasons.append("priority_project")
+    session_protected = bool(meta.get("id") and meta.get("id") in set(protected_sessions or []))
+    if session_protected:
+        reasons.append("protected_session")
     return {
         "path": str(path), "name": path.name, "id": meta.get("id"), "parent_id": meta.get("parent_thread_id"),
         "cwd": meta.get("cwd") or "", "kind": kind, "logical": logical, "logical_h": human_bytes(logical),
@@ -205,16 +218,16 @@ def session_record(path: Path, min_age: float, priority: str | None) -> dict:
         "age_days": round(age, 1), "last_turn_complete": completed, "linked": linked,
         "target": str(target) if target else None, "target_exists": target_exists, "backup": str(backup),
         "backup_exists": backup.is_file(), "backup_bytes": backup.stat().st_size if backup.is_file() else 0,
-        "eligible": not reasons, "reasons": reasons, "error": error,
+        "eligible": not reasons, "reasons": reasons, "error": error, "protected_session": session_protected, "protected_project": project_protected,
     }
 
 
-def scan(codex_home: Path, min_age: float = 14, priority: str | None = None) -> dict:
+def scan(codex_home: Path, min_age: float = 30, priority=None, protected_sessions=None) -> dict:
     root = codex_home / "sessions"
     sessions = []
     if root.exists():
         for path in root.rglob("*.jsonl"):
-            sessions.append(session_record(path, min_age, priority))
+            sessions.append(session_record(path, min_age, priority, protected_sessions))
     sessions.sort(key=lambda item: item["logical"], reverse=True)
     disk = shutil.disk_usage(Path.home())
     eligible = [item for item in sessions if item["eligible"]]
@@ -244,12 +257,12 @@ def append_manifest(volume: Path, archive_name: str, record: dict) -> str:
     return str(manifest)
 
 
-def plan_offload(path_value: str, codex_home: Path, volume_value: str, archive_name: str, min_age: float, priority: str | None) -> dict:
+def plan_offload(path_value: str, codex_home: Path, volume_value: str, archive_name: str, min_age: float, priority=None, protected_sessions=None) -> dict:
     source, relative = lexical_session(path_value, codex_home)
     volume = mounted_volume(volume_value)
     if source.is_symlink() or not source.is_file():
         raise HarborError("Source must be a local regular session file")
-    item = session_record(source, min_age, priority)
+    item = session_record(source, min_age, priority, protected_sessions)
     if not item["eligible"]:
         raise HarborError("Session is not eligible: " + ", ".join(item["reasons"]))
     handles = open_handles(source)
@@ -337,16 +350,16 @@ class HarborHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/scan":
             q = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
             priority = (q["priority"][0] or None) if "priority" in q else (self.app["priority"] or None)
-            age = float(q.get("min_age", ["14"])[0]); key = (age, priority or "")
+            age = float(q.get("min_age", ["30"])[0]); key = (age, priority or "")
             with self.app["cache_lock"]:
                 cached = self.app.get("cache")
                 if cached and cached["key"] == key and time.time() - cached["at"] < 8:
                     result = cached["value"]
                 else:
-                    result = scan(self.app["codex_home"], age, priority)
+                    result = scan(self.app["codex_home"], age, priority, self.app["protected_sessions"])
                     self.app["cache"] = {"key": key, "at": time.time(), "value": result}
             return self.send_json(200, result)
-        if parsed.path == "/api/config": return self.send_json(200, {"token": self.app["token"], "version": VERSION, "priority": self.app["priority"]})
+        if parsed.path == "/api/config": return self.send_json(200, {"token": self.app["token"], "version": VERSION, "priority": self.app["priority"], "protected_projects": parse_projects(self.app["priority"]), "protected_sessions": self.app["protected_sessions"]})
         asset = "index.html" if parsed.path in ("/", "") else parsed.path.lstrip("/")
         file = (self.app["assets"] / asset).resolve()
         if not str(file).startswith(str(self.app["assets"].resolve())) or not file.is_file(): return self.send_error(404)
@@ -357,18 +370,25 @@ class HarborHandler(BaseHTTPRequestHandler):
         try:
             data = self.body()
             if self.path == "/api/settings":
-                saved = save_config(str(data.get("priority") or "")); self.app["priority"] = saved["priority"]
+                saved = save_config(data.get("protected_projects", data.get("priority", [])), data.get("protected_sessions", self.app["protected_sessions"])); self.app["priority"] = "\n".join(saved["protected_projects"]); self.app["protected_sessions"] = saved["protected_sessions"]
                 self.app["cache"] = None
+                return self.send_json(200, {"ok": True, "settings": saved})
+            if self.path == "/api/protect":
+                cfg = load_config(); scope, value, enabled = data.get("scope"), str(data.get("value") or ""), bool(data.get("enabled"))
+                if scope not in ("project", "session") or not value: raise HarborError("Invalid protection target")
+                key = "protected_projects" if scope == "project" else "protected_sessions"; values = set(cfg[key])
+                values.add(value) if enabled else values.discard(value); cfg[key] = sorted(values)
+                saved = save_config(cfg["protected_projects"], cfg["protected_sessions"]); self.app["priority"] = "\n".join(saved["protected_projects"]); self.app["protected_sessions"] = saved["protected_sessions"]; self.app["cache"] = None
                 return self.send_json(200, {"ok": True, "settings": saved})
             paths = data.get("paths") or []
             if not paths: raise HarborError("No sessions selected")
             results = []
             if self.path == "/api/plan":
-                for path in paths: results.append(plan_offload(path, self.app["codex_home"], data["volume"], data.get("archive_name") or DEFAULT_ARCHIVE, float(data.get("min_age", 14)), data.get("priority") or None))
+                for path in paths: results.append(plan_offload(path, self.app["codex_home"], data["volume"], data.get("archive_name") or DEFAULT_ARCHIVE, float(data.get("min_age", 30)), data.get("priority") or None, self.app["protected_sessions"]))
             elif self.path == "/api/offload":
                 volume = mounted_volume(data["volume"]); archive = data.get("archive_name") or DEFAULT_ARCHIVE
                 for path in paths:
-                    plan = plan_offload(path, self.app["codex_home"], str(volume), archive, float(data.get("min_age", 14)), data.get("priority") or None)
+                    plan = plan_offload(path, self.app["codex_home"], str(volume), archive, float(data.get("min_age", 30)), data.get("priority") or None, self.app["protected_sessions"])
                     results.append(offload_one(plan, volume, archive))
             elif self.path == "/api/audit":
                 for path in paths: results.append(audit_one(path, self.app["codex_home"]))
@@ -387,8 +407,8 @@ class HarborHandler(BaseHTTPRequestHandler):
 def serve(args) -> None:
     assets = Path(__file__).resolve().parent.parent / "assets" / "dashboard"
     token = secrets.token_urlsafe(24); codex_home = Path(args.codex_home or os.environ.get("CODEX_HOME", "~/.codex")).expanduser().absolute()
-    priority = load_config()["priority"]
-    server = ThreadingHTTPServer(("127.0.0.1", args.port), HarborHandler); server.app = {"assets": assets, "token": token, "codex_home": codex_home, "priority": priority, "cache": None, "cache_lock": threading.Lock()}
+    config = load_config(); priority = "\n".join(config["protected_projects"])
+    server = ThreadingHTTPServer(("127.0.0.1", args.port), HarborHandler); server.app = {"assets": assets, "token": token, "codex_home": codex_home, "priority": priority, "protected_sessions": config["protected_sessions"], "cache": None, "cache_lock": threading.Lock()}
     url = f"http://127.0.0.1:{server.server_port}/"
     print(json.dumps({"url": url, "version": VERSION, "codex_home": str(codex_home)}, ensure_ascii=False), flush=True)
     if args.open: threading.Timer(0.35, lambda: webbrowser.open(url)).start()
@@ -399,13 +419,15 @@ def serve(args) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__); parser.add_argument("--codex-home")
     sub = parser.add_subparsers(dest="command", required=True)
-    scan_p = sub.add_parser("scan"); scan_p.add_argument("--min-age", type=float, default=14); scan_p.add_argument("--priority")
+    scan_p = sub.add_parser("scan"); scan_p.add_argument("--min-age", type=float, default=30); scan_p.add_argument("--priority")
     serve_p = sub.add_parser("serve"); serve_p.add_argument("--port", type=int, default=48765); serve_p.add_argument("--open", action="store_true")
     audit_p = sub.add_parser("audit"); audit_p.add_argument("path")
     args = parser.parse_args()
     home = Path(args.codex_home or os.environ.get("CODEX_HOME", "~/.codex")).expanduser().absolute()
     try:
-        if args.command == "scan": print(json.dumps(scan(home, args.min_age, args.priority if args.priority is not None else load_config()["priority"] or None), ensure_ascii=False, indent=2))
+        if args.command == "scan":
+            config = load_config(); projects = args.priority if args.priority is not None else config["protected_projects"]
+            print(json.dumps(scan(home, args.min_age, projects, config["protected_sessions"]), ensure_ascii=False, indent=2))
         elif args.command == "serve": serve(args)
         elif args.command == "audit": print(json.dumps(audit_one(args.path, home), ensure_ascii=False, indent=2))
     except (HarborError, OSError, ValueError, json.JSONDecodeError) as exc:
