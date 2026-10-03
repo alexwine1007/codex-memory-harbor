@@ -1,4 +1,5 @@
 import importlib.util
+import json
 from pathlib import Path
 import tempfile
 import unittest
@@ -108,6 +109,44 @@ class VerifiedArchiveTests(unittest.TestCase):
         self.assertIn("不是 OpenClaw Runtime Adapter", handbook)
         self.assertIn("不进行 Git 临时文件清理", handbook)
         self.assertIn("默认只展示方案", handbook)
+
+    def source_plan(self):
+        info = self.source.stat()
+        row = {"source": str(self.source), "bytes": info.st_size,
+               "mtime_ns": info.st_mtime_ns, "inode": info.st_ino}
+        return {"count": 1, "total_bytes": info.st_size, "files": [row]}
+
+    def test_frozen_plan_retains_exact_list_and_validates_metadata(self):
+        plan = self.source_plan()
+        path = self.source.parent / "plan.json"
+        path.write_text(json.dumps(plan))
+        rows = archive.read_source_plan(path)
+        self.assertEqual(len(rows), 1)
+        archive.verify_planned_source(rows[0])
+        self.source.write_bytes(b"new content")
+        with self.assertRaisesRegex(RuntimeError, "清单不一致"):
+            archive.verify_planned_source(rows[0])
+
+    def test_frozen_plan_rejects_duplicates_and_bad_total(self):
+        path = self.source.parent / "plan.json"
+        plan = self.source_plan()
+        plan["total_bytes"] += 1
+        path.write_text(json.dumps(plan))
+        with self.assertRaisesRegex(ValueError, "字节数"):
+            archive.read_source_plan(path)
+        plan = self.source_plan()
+        plan["files"] *= 2
+        plan["count"] = 2
+        plan["total_bytes"] *= 2
+        path.write_text(json.dumps(plan))
+        with self.assertRaisesRegex(ValueError, "来源重复"):
+            archive.read_source_plan(path)
+
+    def test_frozen_plan_retry_requires_archive_receipt_verification(self):
+        row = self.source_plan()["files"][0]
+        self.run_archive()
+        archive.verify_planned_source(row)
+        self.assertEqual(self.run_archive()["status"], "already_verified")
 
 
 if __name__ == "__main__":
