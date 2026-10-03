@@ -16,6 +16,7 @@
 6. [已测试边界](../../skills/codex-memory-harbor/references/tested-boundaries.md)——当前支持声明背后的证据。
 7. [前端设计基础](../design/FRONTEND_FOUNDATION.md)——中文“未来记忆港”的体验结构、设计语言、状态模型与验证方案。
 8. [中文交互原型](../design/prototype/index.html)——完全使用静态样例数据，不连接真实迁移接口。
+9. [明确清单的备份文件迁移](file-archives.md)——独立维护辅助工具，校验后保留原路径链接，不代表新增 Runtime 支持。
 
 ## 手册地图
 
