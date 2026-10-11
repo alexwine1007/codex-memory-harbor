@@ -5,7 +5,8 @@ import tempfile
 import unittest
 from unittest import mock
 
-SCRIPT = Path(__file__).parents[1] / "scripts/archive_verified_files.py"
+REPO_ROOT = Path(__file__).parents[1]
+SCRIPT = REPO_ROOT / "skills/codex-memory-harbor/scripts/archive_files.py"
 spec = importlib.util.spec_from_file_location("archive_verified_files", SCRIPT)
 archive = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(archive)
@@ -15,7 +16,9 @@ class VerifiedArchiveTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        root = Path(self.temp.name)
+        root = Path(self.temp.name).resolve()
+        patcher = mock.patch.object(archive.Path, "home", return_value=root)
+        patcher.start(); self.addCleanup(patcher.stop)
         self.source = root / "local.tar.gz"
         self.target = root / "external.tar.gz"
         self.receipt = root / "receipt.jsonl"
@@ -105,7 +108,7 @@ class VerifiedArchiveTests(unittest.TestCase):
         self.assertTrue(self.source.is_symlink())
 
     def test_handbook_keeps_runtime_claims_and_git_deletion_out_of_scope(self):
-        handbook = (SCRIPT.parents[1] / "docs/handbook/file-archives.md").read_text()
+        handbook = (REPO_ROOT / "docs/handbook/file-archives.md").read_text()
         self.assertIn("不是 OpenClaw Runtime Adapter", handbook)
         self.assertIn("不进行 Git 临时文件清理", handbook)
         self.assertIn("默认只展示方案", handbook)

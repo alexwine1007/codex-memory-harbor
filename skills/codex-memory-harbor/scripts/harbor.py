@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import html
 import json
 import mimetypes
@@ -27,7 +28,7 @@ from collections import deque
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "0.4.4-beta.3"
+VERSION = "0.4.5-beta.1"
 DEFAULT_ARCHIVE = "Memory Harbor"
 LEGACY_ARCHIVES = ("Codex Memory Harbor",)
 CATALOG_SCHEMA_VERSION = 3
@@ -87,8 +88,8 @@ def load_config() -> dict:
         value = json.loads(path.read_text(encoding="utf-8"))
         projects = value.get("protected_projects") or ([value["priority"]] if value.get("priority") else [])
         return {"protected_projects": [str(item) for item in projects if item], "protected_sessions": [str(item) for item in value.get("protected_sessions", []) if item]}
-    except (OSError, ValueError, json.JSONDecodeError):
-        return {"protected_projects": [], "protected_sessions": []}
+    except (OSError, ValueError, TypeError) as exc:
+        raise HarborError("保护设置无法读取，请先修复设置；本次停止迁移") from exc
 
 
 def parse_projects(value) -> list[str]:
@@ -171,7 +172,12 @@ def local_allocated(path: Path) -> int:
 
 
 def open_handles(path: Path) -> int:
-    result = subprocess.run(["lsof", str(path)], capture_output=True, text=True, check=False)
+    try:
+        result = subprocess.run(["lsof", "-nP", str(path)], capture_output=True, text=True, check=False, timeout=10)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise HarborError("文件句柄检查未完成，停止停泊") from exc
+    if result.returncode not in (0, 1) or result.stderr.strip():
+        raise HarborError("文件句柄检查失败，停止停泊")
     rows = [row for row in result.stdout.splitlines() if row.strip()]
     return max(0, len(rows) - 1)
 
@@ -189,19 +195,21 @@ def is_priority(cwd: str | None, priority) -> bool:
 
 
 def lexical_session(path_value: str, codex_home: Path) -> tuple[Path, Path]:
-    path = Path(path_value).expanduser().absolute()
-    root = (codex_home / "sessions").absolute()
+    path = Path(os.path.abspath(Path(path_value).expanduser()))
+    root = Path(os.path.abspath(codex_home / "sessions"))
     try:
         relative = path.relative_to(root)
     except ValueError as exc:
         raise HarborError(f"历史记录必须位于 {root} 下") from exc
+    if path.parent.resolve() != path.parent or path.suffix != ".jsonl":
+        raise HarborError("历史路径包含目录链接或不是 JSONL 文件")
     return path, relative
 
 
 def mounted_volume(path_value: str) -> Path:
     volume = Path(path_value).expanduser().absolute()
-    if not str(volume).startswith("/Volumes/"):
-        raise HarborError("外置存储必须挂载在 /Volumes 下")
+    if volume.parent != Path("/Volumes") or volume.is_symlink():
+        raise HarborError("必须选择 /Volumes 下的真实挂载卷")
     if not volume.is_dir() or not os.path.ismount(volume):
         raise HarborError(f"外置存储尚未挂载：{volume}")
     if not os.access(volume, os.W_OK):
@@ -1328,8 +1336,92 @@ def scan(codex_home: Path, min_age: float = 30, priority=None, protected_session
         "disk": {"free": disk.free, "free_h": human_bytes(disk.free), "total": disk.total, "used": disk.used,
                  "used_percent": round(disk.used / disk.total * 100, 1)},
         "totals": totals, "volumes": volumes, "storage_targets": available_storage_targets(volumes),
-        "catalog": catalog_result, "sessions": sessions, "generated_at": int(time.time()),
+        "catalog": catalog_result, "sessions": sessions,
+        "projects": list(catalog["projects"].values()), "generated_at": int(time.time()),
     }
+
+
+def project_storage_plan(codex_home: Path, project_id: str) -> dict:
+    """On-demand metadata-only inventory; normal scans never walk project assets."""
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", project_id):
+        raise HarborError("项目标识无效")
+    projects = load_project_catalog(codex_home)["projects"]
+    project = projects.get(project_id)
+    if not project or len(project["roots"]) != 1:
+        raise HarborError("请选择一个具有单一本机目录的已保存项目")
+    spec = importlib.util.spec_from_file_location("harbor_project_files", Path(__file__).with_name("project_files.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    # Saved rename aliases may point at the same local checkout. Keep the saved entry
+    # while using its canonical local file paths; aliases into /Volumes are rejected.
+    files = module.asset_plan(str(Path(project["roots"][0]).expanduser().resolve(strict=True)))
+    config = load_config()
+    if is_priority(project["roots"][0], config["protected_projects"]):
+        files["retained"].append({"reason": "priority_project", "label": "项目已设为本机保留", "count": files["count"]})
+        files["files"] = []; files["count"] = 0; files["total_bytes"] = 0
+        for group in files["groups"]:
+            group["candidate_count"] = 0; group["candidate_bytes"] = 0
+    snapshot = scan(codex_home, 30, config["protected_projects"], config["protected_sessions"])
+    histories = [item for item in snapshot["sessions"] if item.get("project_id") == project_id]
+    reasons = {}
+    for item in histories:
+        if not item["linked"]:
+            for reason in item["reasons"]:
+                reasons[reason] = reasons.get(reason, 0) + 1
+    return {"project": project, "files": files,
+            "history": {"total": len(histories), "docked": sum(item["linked"] for item in histories),
+                        "total_bytes": sum(item["logical"] for item in histories),
+                        "docked_bytes": sum(item["logical"] for item in histories if item["linked"]),
+                        "docked_online": sum(item["linked"] and item["target_exists"] for item in histories),
+                        "eligible": sum(item["eligible"] for item in histories),
+                        "eligible_bytes": sum(item["logical"] for item in histories if item["eligible"]),
+                        "local_bytes": sum(item["logical"] for item in histories if not item["linked"]),
+                        "retained": [{"reason": key, "label": REASON_LABELS.get(key, key), "count": value} for key, value in sorted(reasons.items())]},
+            "continuity": {"original_root": project["roots"][0], "file_paths_preserved": True,
+                           "offline_raw_read": False, "whole_active_workspace_external": False}}
+
+
+def project_archive_module():
+    spec = importlib.util.spec_from_file_location("harbor_archive_files", Path(__file__).with_name("archive_files.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def offload_project_file(app: dict, data: dict, restore: bool = False) -> dict:
+    """Execute only an exact source in the server-owned, volume-bound frozen plan."""
+    frozen = app.get("project_plans", {}).get(str(data.get("plan_id") or ""))
+    if not frozen or time.time() - frozen["created_at"] > 3600:
+        raise HarborError("项目方案已过期，请重新查看后确认")
+    if data.get("confirmation") != ("RESTORE PROJECT FILE" if restore else "DOCK PROJECT FILE"):
+        raise HarborError("请先确认本次项目文件停泊方案")
+    path = str(data.get("path") or "")
+    row = frozen["rows"].get(path)
+    if not row:
+        raise HarborError("文件不在本次已确认项目方案中")
+    config = load_config()
+    if not restore and is_priority(frozen["root"], config["protected_projects"]):
+        raise HarborError("项目已设为本机保留，停止停泊")
+    volume = Path(frozen["volume"])
+    if str(data.get("volume") or "") != str(volume):
+        raise HarborError("目标盘已变化，请重新查看项目方案")
+    def check_volume():
+        verify_external_volume(volume, frozen["uuid"])
+        return {"volume_uuid": frozen["uuid"], "volume_path": str(volume)}
+    check_volume()
+    module = project_archive_module()
+    source = Path(row["source"])
+    if source.parent.resolve() != source.parent:
+        raise HarborError("项目父目录发生变化，停止停泊")
+    if not restore:
+        module.verify_planned_source(row)
+    target = volume / DEFAULT_ARCHIVE / "Project Assets" / frozen["project_id"] / row["relative"]
+    receipt = volume / DEFAULT_ARCHIVE / "Project Assets" / frozen["project_id"] / "archive-receipt.jsonl"
+    module.safe_directory(receipt.parent)
+    if restore:
+        return module.restore_file(source, target, receipt, check_volume)
+    return module.archive_file(source, target, receipt, check_volume,
+                               keep_local=data.get("keep_local", True) is not False)
 
 
 def compact_summary(codex_home: Path, repair: bool = False) -> dict:
@@ -1358,6 +1450,9 @@ def compact_summary(codex_home: Path, repair: bool = False) -> dict:
 
 def append_manifest(volume: Path, archive_name: str, record: dict) -> str:
     manifest = volume / archive_name / "manifests" / "offload_manifest.jsonl"
+    for ancestor in [manifest, *manifest.parents]:
+        if ancestor.is_symlink():
+            raise HarborError("校验清单路径包含链接，停止写入")
     manifest.parent.mkdir(parents=True, exist_ok=True)
     with manifest.open("a", encoding="utf-8") as stream:
         stream.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
@@ -1365,7 +1460,52 @@ def append_manifest(volume: Path, archive_name: str, record: dict) -> str:
     return str(manifest)
 
 
+def file_signature(path: Path) -> tuple:
+    info = path.stat()
+    return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+
+
+def durable_directory(path: Path) -> None:
+    descriptor = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def verify_external_volume(volume: Path, expected_uuid: str) -> None:
+    mounted_volume(str(volume))
+    if not expected_uuid or volume_identity(volume).get("uuid") != expected_uuid:
+        raise HarborError("外置卷身份与停泊方案不一致，停止操作")
+
+
+def validate_archive_name(archive_name: str) -> None:
+    if not archive_name or Path(archive_name).name != archive_name or archive_name in (".", ".."):
+        raise HarborError("停泊目录名无效")
+
+
+def recorded_copy(source: Path, target: Path) -> dict | None:
+    """Find the expected digest in the append-only external receipt, not in the link."""
+    for ancestor in target.parents:
+        manifest = ancestor / "manifests/offload_manifest.jsonl"
+        if not manifest.is_file():
+            continue
+        if manifest.is_symlink():
+            raise HarborError("校验清单不是普通文件")
+        record = None
+        with manifest.open(encoding="utf-8") as stream:
+            for line in stream:
+                value = json.loads(line)
+                if value.get("source") == str(source) and value.get("destination") == str(target):
+                    record = value
+        return record
+    return None
+
+
 def plan_offload(path_value: str, codex_home: Path, volume_value: str, archive_name: str, min_age: float, priority=None, protected_sessions=None) -> dict:
+    validate_archive_name(archive_name)
+    if min_age < 0:
+        raise HarborError("静置天数不能为负数")
     source, relative = lexical_session(path_value, codex_home)
     volume = mounted_volume(volume_value)
     if source.is_symlink() or not source.is_file():
@@ -1381,6 +1521,8 @@ def plan_offload(path_value: str, codex_home: Path, volume_value: str, archive_n
         raise HarborError(f"该历史记录仍有 {handles} 个打开的文件句柄")
     destination = volume / archive_name / "sessions" / relative
     identity = volume_identity(volume)
+    if not identity.get("uuid"):
+        raise HarborError("无法确认外置卷持久身份，停止停泊")
     backup = source.with_name(source.name + ".offload-local-backup")
     if backup.exists() or backup.is_symlink():
         raise HarborError(f"本地回滚副本已存在：{backup}")
@@ -1394,26 +1536,60 @@ def plan_offload(path_value: str, codex_home: Path, volume_value: str, archive_n
         "timestamp": item.get("timestamp"), "project_id": item.get("project_id"),
         "project_name": item.get("project_name"), "project_path": item.get("project_path"),
         "volume_uuid": identity.get("uuid", ""), "volume_name": volume.name,
+        "volume_path": str(volume), "source_signature": file_signature(source),
         "device_identifier": identity.get("device_identifier", ""), "open_handles": handles,
     }
 
 
 def offload_one(plan: dict, volume: Path, archive_name: str, codex_home: Path | None = None) -> dict:
+    with project_archive_module().source_lock(Path(plan["source"])):
+        return _offload_one(plan, volume, archive_name, codex_home)
+
+
+def _offload_one(plan: dict, volume: Path, archive_name: str, codex_home: Path | None = None) -> dict:
     source, destination, backup = Path(plan["source"]), Path(plan["destination"]), Path(plan["backup"])
+    validate_archive_name(archive_name)
+    if codex_home:
+        lexical_session(str(source), codex_home)
+    if (not destination.is_relative_to(volume / archive_name / "sessions")
+            or source.is_symlink() or not source.is_file()
+            or backup.exists() or backup.is_symlink()):
+        raise HarborError("来源、目标或回滚副本状态不符合停泊条件")
+    verify_external_volume(volume, plan.get("volume_uuid", ""))
+    if open_handles(source):
+        raise HarborError("来源仍在使用，停止停泊")
+    before = file_signature(source)
+    if plan.get("source_signature") and tuple(plan["source_signature"]) != before:
+        raise HarborError("来源与已确认方案不一致，停止停泊")
+    if before[2] != plan["bytes"] or sha256(source) != plan["sha256"]:
+        raise HarborError("来源内容与已确认方案不一致，停止停泊")
     recall_result = index_session_memory(str(source), codex_home, plan.get("sha256")) if codex_home else None
+    for ancestor in [destination.parent, *destination.parent.parents]:
+        if ancestor.is_symlink():
+            raise HarborError("外部目标父目录包含链接，停止停泊")
     destination.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(source, destination)
+    if destination.parent.resolve() != destination.parent:
+        raise HarborError("外部目标父目录包含链接，停止停泊")
+    with source.open("rb") as original, destination.open("xb") as copied:
+        shutil.copyfileobj(original, copied, 4 * 1024 * 1024)
+        copied.flush()
+        os.fsync(copied.fileno())
+    durable_directory(destination.parent)
     if destination.stat().st_size != plan["bytes"] or sha256(destination) != plan["sha256"]:
-        destination.unlink(missing_ok=True)
         raise HarborError("外部副本校验失败")
+    verify_external_volume(volume, plan.get("volume_uuid", ""))
+    if open_handles(source) or file_signature(source) != before or sha256(source) != plan["sha256"]:
+        raise HarborError("复制期间来源发生变化或正在使用，原件保持不变")
     os.replace(source, backup)
     try:
         source.symlink_to(destination)
-        if sha256(source) != plan["sha256"]:
+        durable_directory(source.parent)
+        verify_external_volume(volume, plan.get("volume_uuid", ""))
+        if sha256(source) != plan["sha256"] or sha256(backup) != plan["sha256"]:
             raise HarborError("连续性链接校验失败")
     except Exception:
         source.unlink(missing_ok=True); os.replace(backup, source); raise
-    record = {**plan, "event": "offloaded_with_local_backup", "recorded_at": int(time.time())}
+    record = {**plan, "volume_path": str(volume), "event": "offloaded_with_local_backup", "recorded_at": int(time.time())}
     if recall_result:
         record["recall_fragments"] = recall_result["fragments"]
     record["manifest"] = append_manifest(volume, archive_name, record)
@@ -1428,16 +1604,37 @@ def audit_one(path_value: str, codex_home: Path) -> dict:
     result = {"source": str(source), "target": str(target), "target_exists": target.is_file(), "backup": str(backup), "backup_exists": backup.is_file()}
     if target.is_file(): result["target_sha256"] = sha256(target); result["source_sha256"] = sha256(source)
     if backup.is_file(): result["backup_sha256"] = sha256(backup)
+    record = recorded_copy(source, target) if target.is_file() else None
+    result["receipt_exists"] = bool(record)
+    if record:
+        result["expected_sha256"] = record.get("sha256")
+        result["volume_uuid"] = record.get("volume_uuid", "")
+        result["volume_path"] = record.get("volume_path") or (str(Path("/Volumes") / record["volume_name"]) if record.get("volume_name") else "")
     hashes = [value for key, value in result.items() if key.endswith("sha256")]
-    result["verified"] = len(hashes) >= 2 and len(set(hashes)) == 1
+    result["verified"] = bool(record and target.stat().st_size == record.get("bytes")
+                              and len(hashes) >= 3 and len(set(hashes)) == 1)
     return result
 
 
 def finalize_one(path_value: str, codex_home: Path) -> dict:
+    with project_archive_module().source_lock(Path(path_value)):
+        return _finalize_one(path_value, codex_home)
+
+
+def _finalize_one(path_value: str, codex_home: Path) -> dict:
     audit = audit_one(path_value, codex_home)
     if not audit["verified"] or not audit["backup_exists"]:
         raise HarborError("释放本地副本前必须同时具备已验证链接和本地回滚副本")
-    backup = Path(audit["backup"]); released = backup.stat().st_size; backup.unlink()
+    if not audit.get("volume_path"):
+        raise HarborError("校验记录缺少外置卷身份，保留本地副本")
+    verify_external_volume(Path(audit["volume_path"]), audit.get("volume_uuid", ""))
+    backup = Path(audit["backup"])
+    if open_handles(backup) or open_handles(Path(audit["target"])):
+        raise HarborError("记录仍在使用，保留本地副本")
+    if sha256(backup) != audit["expected_sha256"] or sha256(Path(audit["target"])) != audit["expected_sha256"]:
+        raise HarborError("释放前内容发生变化，保留本地副本")
+    released = backup.stat().st_size; backup.unlink()
+    durable_directory(backup.parent)
     return {**audit, "event": "local_backup_removed", "bytes_released": released, "bytes_released_h": human_bytes(released)}
 
 
@@ -1466,6 +1663,8 @@ def migrate_path(path_value: str, codex_home: Path, volume: Path, archive_name: 
         audit = audit_one(path_value, codex_home)
         if not audit["verified"]:
             raise HarborError("现有停泊链接未通过校验")
+        if not Path(audit["target"]).is_relative_to(volume / archive_name / "sessions"):
+            raise HarborError("现有链接不属于本次选择的外置目标")
         if audit["backup_exists"]:
             finalized = finalize_one(path_value, codex_home)
             return {**audit, "event": "migrated_external_primary", "backup_exists": False, "bytes_released": finalized["bytes_released"], "bytes_released_h": finalized["bytes_released_h"]}
@@ -1475,19 +1674,35 @@ def migrate_path(path_value: str, codex_home: Path, volume: Path, archive_name: 
 
 
 def restore_one(path_value: str, codex_home: Path) -> dict:
+    with project_archive_module().source_lock(Path(path_value)):
+        return _restore_one(path_value, codex_home)
+
+
+def _restore_one(path_value: str, codex_home: Path) -> dict:
     source, _ = lexical_session(path_value, codex_home)
     if not source.is_symlink(): raise HarborError("来源不是停泊后的连续性链接")
     target = Path(os.readlink(source))
     if not target.is_file(): raise HarborError("外部历史实体当前不可用")
-    expected = sha256(target); backup = source.with_name(source.name + ".offload-local-backup")
+    audit = audit_one(path_value, codex_home)
+    if not audit["verified"]:
+        raise HarborError("外部实体与原始校验记录不一致，停止恢复")
+    if open_handles(source):
+        raise HarborError("记录仍在使用，停止恢复")
+    expected = audit["expected_sha256"]; backup = source.with_name(source.name + ".offload-local-backup")
     if backup.is_file():
         if sha256(backup) != expected: raise HarborError("本地回滚副本与外部历史实体不一致")
-        source.unlink(); os.replace(backup, source)
+        if open_handles(backup):
+            raise HarborError("本地副本仍在使用，停止恢复")
+        os.replace(backup, source)
     else:
         temporary = source.with_name(source.name + ".restore-temp")
-        shutil.copy2(target, temporary)
-        if sha256(temporary) != expected: temporary.unlink(missing_ok=True); raise HarborError("恢复后的副本校验失败")
-        source.unlink(); os.replace(temporary, source)
+        with target.open("rb") as original, temporary.open("xb") as copied:
+            shutil.copyfileobj(original, copied, 4 * 1024 * 1024)
+            copied.flush(); os.fsync(copied.fileno())
+        if sha256(temporary) != expected or sha256(target) != expected:
+            raise HarborError("恢复后的副本校验失败；临时副本保留")
+        os.replace(temporary, source)
+    durable_directory(source.parent)
     return {"source": str(source), "target": str(target), "sha256": expected, "event": "restored_local_regular_file"}
 
 
@@ -1541,7 +1756,7 @@ class HarborHandler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store"); self.send_header("Content-Length", str(len(raw))); self.end_headers(); self.wfile.write(raw)
     def do_POST(self):
         if self.headers.get("X-Harbor-Token") != self.app["token"]: return self.send_json(403, {"error_code": "invalid_action_token", "error": "操作令牌无效，请重新打开仪表盘"})
-        mutation_lock = self.app.get("mutation_lock") if self.path in ("/api/offload", "/api/migrate", "/api/finalize", "/api/restore") else None
+        mutation_lock = self.app.get("mutation_lock") if self.path in ("/api/offload", "/api/migrate", "/api/finalize", "/api/restore", "/api/project-file-offload", "/api/project-file-restore", "/api/repair-links", "/api/protect", "/api/settings") else None
         if mutation_lock:
             mutation_lock.acquire()
         try:
@@ -1559,6 +1774,36 @@ class HarborHandler(BaseHTTPRequestHandler):
                 return self.send_json(200, {"ok": True, "settings": saved})
             if self.path == "/api/task-detail":
                 return self.send_json(200, {"ok": True, "task": thread_detail(self.app["codex_home"], str(data.get("id") or ""))})
+            if self.path == "/api/project-plan":
+                result = project_storage_plan(self.app["codex_home"], str(data.get("project_id") or ""))
+                volume = mounted_volume(resolve_storage_target(data))
+                uuid = volume_identity(volume).get("uuid", "")
+                verify_external_volume(volume, uuid)
+                plan_id = secrets.token_urlsafe(24)
+                plans = self.app.setdefault("project_plans", {})
+                for key in list(plans):
+                    if time.time() - plans[key]["created_at"] > 3600: del plans[key]
+                if len(plans) >= 10:
+                    raise HarborError("待确认方案过多，请关闭并重新打开港口")
+                plans[plan_id] = {"rows": {row["source"]: row for row in result["files"]["files"]},
+                                  "project_id": result["project"]["id"], "root": result["files"]["project_root"],
+                                  "volume": str(volume), "uuid": uuid, "created_at": time.time()}
+                for row in result["files"]["parked_files"]:
+                    expected = volume / DEFAULT_ARCHIVE / "Project Assets" / result["project"]["id"] / row["relative"]
+                    if row["target"] == str(expected):
+                        plans[plan_id]["rows"][row["source"]] = row
+                        row["restorable"] = True
+                result["plan_id"] = plan_id
+                result["volume"] = {"path": str(volume), "uuid": uuid, "name": volume.name}
+                return self.send_json(200, {"ok": True, "plan": result})
+            if self.path == "/api/project-file-offload":
+                result = offload_project_file(self.app, data)
+                self.app["cache"] = None
+                return self.send_json(200, {"ok": True, "result": result})
+            if self.path == "/api/project-file-restore":
+                result = offload_project_file(self.app, data, restore=True)
+                self.app["cache"] = None
+                return self.send_json(200, {"ok": True, "result": result})
             if self.path == "/api/task-record":
                 return self.send_json(200, {"ok": True, "record": task_record(self.app["codex_home"], str(data.get("id") or ""))})
             if self.path == "/api/rebuild-catalog":
@@ -1579,14 +1824,14 @@ class HarborHandler(BaseHTTPRequestHandler):
             results = []
             if self.path == "/api/plan":
                 volume_value = resolve_storage_target(data)
-                for path in paths: results.append(plan_offload(path, self.app["codex_home"], volume_value, data.get("archive_name") or DEFAULT_ARCHIVE, float(data.get("min_age", 30)), data.get("priority") or None, self.app["protected_sessions"]))
+                for path in paths: results.append(plan_offload(path, self.app["codex_home"], volume_value, data.get("archive_name") or DEFAULT_ARCHIVE, float(data.get("min_age", 30)), self.app["priority"] or None, self.app["protected_sessions"]))
             elif self.path in ("/api/offload", "/api/migrate"):
                 volume = mounted_volume(resolve_storage_target(data)); archive = data.get("archive_name") or DEFAULT_ARCHIVE
                 for path in paths:
                     if self.path == "/api/migrate":
-                        results.append(migrate_path(path, self.app["codex_home"], volume, archive, float(data.get("min_age", 30)), data.get("priority") or None, self.app["protected_sessions"]))
+                        results.append(migrate_path(path, self.app["codex_home"], volume, archive, float(data.get("min_age", 30)), self.app["priority"] or None, self.app["protected_sessions"]))
                     else:
-                        plan = plan_offload(path, self.app["codex_home"], str(volume), archive, float(data.get("min_age", 30)), data.get("priority") or None, self.app["protected_sessions"])
+                        plan = plan_offload(path, self.app["codex_home"], str(volume), archive, float(data.get("min_age", 30)), self.app["priority"] or None, self.app["protected_sessions"])
                         results.append(offload_one(plan, volume, archive, self.app["codex_home"]))
             elif self.path == "/api/audit":
                 for path in paths: results.append(audit_one(path, self.app["codex_home"]))
@@ -1660,6 +1905,8 @@ def main() -> int:
     sub.add_parser("rebuild-index")
     sub.add_parser("index-status")
     sub.add_parser("repair-links")
+    project_p = sub.add_parser("project-plan", help="按已保存项目盘点素材与历史；不移动文件")
+    project_p.add_argument("project_id")
     compact_p = sub.add_parser("compact-status"); compact_p.add_argument("--repair-links", action="store_true")
     args = parser.parse_args()
     home = Path(args.codex_home or os.environ.get("CODEX_HOME", "~/.codex")).expanduser().absolute()
@@ -1684,6 +1931,8 @@ def main() -> int:
         elif args.command == "rebuild-index":
             config = load_config(); print(json.dumps(rebuild_catalog(home, 30, config["protected_projects"], config["protected_sessions"]), ensure_ascii=False, indent=2))
         elif args.command == "index-status": print(json.dumps(catalog_status(home), ensure_ascii=False, indent=2))
+        elif args.command == "project-plan":
+            print(json.dumps(project_storage_plan(home, args.project_id), ensure_ascii=False, indent=2))
         elif args.command == "repair-links":
             volumes = available_volumes(); import_mounted_manifests(home, volumes)
             print(json.dumps({"repaired": repair_links_by_volume_identity(home, volumes)}, ensure_ascii=False, indent=2))

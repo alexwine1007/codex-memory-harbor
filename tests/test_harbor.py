@@ -21,6 +21,14 @@ harbor = importlib.util.module_from_spec(spec); spec.loader.exec_module(harbor)
 
 
 class HarborTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory(); self.addCleanup(temporary.cleanup)
+        environment = mock.patch.dict(os.environ, {"CODEX_HARBOR_FILE_LOCK_DIR": temporary.name})
+        environment.start(); self.addCleanup(environment.stop)
+        # Ordinary regression fixtures use temporary directories rather than real mounted disks.
+        patcher = mock.patch.object(harbor, "verify_external_volume", return_value=None)
+        patcher.start(); self.addCleanup(patcher.stop)
+
     def test_repository_policy_requires_commits_and_verification(self):
         policy = (REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8")
         self.assertIn("必须创建一个对应的 Git commit", policy)
@@ -66,6 +74,18 @@ class HarborTests(unittest.TestCase):
         self.assertIn("127.0.0.1，随机可用端口", desktop)
         self.assertIn("当前设计债务", desktop)
 
+    def test_dashboard_separates_history_capacity_from_project_media(self):
+        dashboard = REPO_ROOT / "skills/codex-memory-harbor/assets/dashboard"
+        html = (dashboard / "index.html").read_text(encoding="utf-8")
+        javascript = (dashboard / "app.js").read_text(encoding="utf-8")
+        self.assertIn("新增可停泊的任务历史", html)
+        self.assertIn("查看候选历史", html)
+        self.assertIn("查看项目大素材", html)
+        self.assertIn("这里不含已停泊历史，也不含项目视频、图片等大素材", javascript)
+        self.assertIn("$('#projectShortcut').onclick=showProjectPlan", javascript)
+        self.assertIn("fmt(history.docked_bytes)", javascript)
+        self.assertIn("fmt(files.total_bytes)", javascript)
+
     def test_chinese_scifi_prototype_is_fixture_only_and_interactive(self):
         prototype = REPO_ROOT / "docs/design/prototype"
         html = (prototype / "index.html").read_text(encoding="utf-8")
@@ -97,15 +117,15 @@ class HarborTests(unittest.TestCase):
         self.assertNotIn('HarborError("External volume is not mounted', source)
         self.assertEqual(harbor.user_error(PermissionError("raw english")), ("permission_denied", "没有权限访问所需文件或存储设备"))
         self.assertEqual(harbor.user_error(FileNotFoundError("raw english")), ("file_unavailable", "所需文件或存储位置当前不可用"))
-        with self.assertRaisesRegex(harbor.HarborError, "外置存储必须挂载在 /Volumes 下"):
+        with self.assertRaisesRegex(harbor.HarborError, "必须选择 /Volumes 下的真实挂载卷"):
             harbor.mounted_volume("/tmp")
 
     def test_public_project_name_is_memory_harbor(self):
         metadata = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
         readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
         self.assertIn('name = "memory-harbor"', metadata)
-        self.assertIn('version = "0.4.4b3"', metadata)
-        self.assertEqual(harbor.VERSION, "0.4.4-beta.3")
+        self.assertIn('version = "0.4.5b1"', metadata)
+        self.assertEqual(harbor.VERSION, "0.4.5-beta.1")
         self.assertEqual(readme.splitlines()[0], "# Memory Harbor")
         self.assertIn("canonical checkout directory is `memory-harbor`", readme)
         self.assertIn("`codex-memory-harbor` compatibility symlink", readme)
@@ -151,7 +171,7 @@ class HarborTests(unittest.TestCase):
     def test_dashboard_server_can_bind_an_ephemeral_port(self):
         with tempfile.TemporaryDirectory() as d:
             env = os.environ.copy()
-            env["CODEX_HARBOR_CONFIG"] = str(Path(d) / "config.json")
+            env["CODEX_HARBOR_CONFIG"] = str(Path(d).resolve() / "config.json")
             process = subprocess.Popen(
                 [
                     sys.executable,
@@ -185,7 +205,7 @@ class HarborTests(unittest.TestCase):
     def test_dashboard_server_exits_when_its_helper_parent_exits(self):
         with tempfile.TemporaryDirectory() as d:
             env = os.environ.copy()
-            env["CODEX_HARBOR_CONFIG"] = str(Path(d) / "config.json")
+            env["CODEX_HARBOR_CONFIG"] = str(Path(d).resolve() / "config.json")
             parent_code = """
 import json, os, subprocess, sys
 child = subprocess.Popen(
@@ -231,22 +251,22 @@ print(json.dumps({'pid': child.pid, 'url': payload['url']}), flush=True)
         old = time.time()-30*86400; os.utime(path,(old,old)); return path
     def test_main_is_never_eligible(self):
         with tempfile.TemporaryDirectory() as d:
-            root=Path(d); p=self.fixture(root,child=False)
+            root=Path(d).resolve(); p=self.fixture(root,child=False)
             item=harbor.session_record(p,14,None)
             self.assertFalse(item["eligible"]); self.assertIn("main_task",item["reasons"])
     def test_incomplete_is_never_eligible(self):
         with tempfile.TemporaryDirectory() as d:
-            root=Path(d); p=self.fixture(root,complete=False)
+            root=Path(d).resolve(); p=self.fixture(root,complete=False)
             item=harbor.session_record(p,14,None)
             self.assertFalse(item["eligible"]); self.assertIn("last_turn_incomplete",item["reasons"])
     def test_priority_project_is_protected(self):
         with tempfile.TemporaryDirectory() as d:
-            root=Path(d); p=self.fixture(root)
+            root=Path(d).resolve(); p=self.fixture(root)
             item=harbor.session_record(p,14,"/tmp")
             self.assertFalse(item["eligible"]); self.assertIn("priority_project",item["reasons"])
     def test_individual_session_pin_overrides_age(self):
         with tempfile.TemporaryDirectory() as d:
-            root=Path(d); p=self.fixture(root)
+            root=Path(d).resolve(); p=self.fixture(root)
             item=harbor.session_record(p,14,None,["child-1"])
             self.assertFalse(item["eligible"]); self.assertIn("protected_session",item["reasons"])
     def test_cloud_provider_is_reserved_but_not_claimed_available(self):
@@ -284,7 +304,7 @@ print(json.dumps({'pid': child.pid, 'url': payload['url']}), flush=True)
         self.assertEqual(identity["device_identifier"],"disk9s1")
     def test_scan_uses_codex_project_assignments_and_preserves_projectless(self):
         with tempfile.TemporaryDirectory() as d:
-            root=Path(d); self.fixture(root)
+            root=Path(d).resolve(); self.fixture(root)
             state={
                 "local-projects":{"project-1":{"name":"Example Project","rootPaths":["/tmp/example"]}},
                 "thread-project-assignments":{"parent-1":{"projectKind":"local","projectId":"project-1"}},
@@ -297,7 +317,7 @@ print(json.dumps({'pid': child.pid, 'url': payload['url']}), flush=True)
             self.assertFalse(item["projectless"])
     def test_scan_uses_codex_title_index_and_loads_preview_on_demand(self):
         with tempfile.TemporaryDirectory() as d:
-            root=Path(d); path=self.fixture(root)
+            root=Path(d).resolve(); path=self.fixture(root)
             database=root/"state_5.sqlite"
             with sqlite3.connect(database) as connection:
                 connection.execute("CREATE TABLE threads (id TEXT, rollout_path TEXT, title TEXT, preview TEXT, cwd TEXT, created_at INTEGER, updated_at INTEGER, created_at_ms INTEGER, updated_at_ms INTEGER, agent_nickname TEXT)")
@@ -311,7 +331,7 @@ print(json.dumps({'pid': child.pid, 'url': payload['url']}), flush=True)
 
     def test_local_catalog_remains_searchable_after_source_disappears(self):
         with tempfile.TemporaryDirectory() as d:
-            root=Path(d); path=self.fixture(root)
+            root=Path(d).resolve(); path=self.fixture(root)
             database=root/"state_5.sqlite"
             with sqlite3.connect(database) as connection:
                 connection.execute("CREATE TABLE threads (id TEXT, rollout_path TEXT, title TEXT, preview TEXT, cwd TEXT, created_at INTEGER, updated_at INTEGER, created_at_ms INTEGER, updated_at_ms INTEGER, agent_nickname TEXT)")
@@ -326,7 +346,7 @@ print(json.dumps({'pid': child.pid, 'url': payload['url']}), flush=True)
 
     def test_search_does_not_create_a_catalog_when_none_exists(self):
         with tempfile.TemporaryDirectory() as d:
-            root=Path(d)
+            root=Path(d).resolve()
             self.assertEqual(harbor.catalog_search(root,"不存在"),[])
             self.assertEqual(harbor.recall_search(root,"不存在"),[])
             self.assertFalse(harbor.catalog_path(root).exists())
@@ -334,7 +354,7 @@ print(json.dumps({'pid': child.pid, 'url': payload['url']}), flush=True)
     def test_legacy_named_external_manifest_rebuilds_searchable_catalog(self):
         with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as v:
             self.assertEqual(harbor.DEFAULT_ARCHIVE, "Memory Harbor")
-            root=Path(d); volume=Path(v); manifest=volume/"Codex Memory Harbor/manifests/offload_manifest.jsonl"
+            root=Path(d).resolve(); volume=Path(v).resolve(); manifest=volume/"Codex Memory Harbor/manifests/offload_manifest.jsonl"
             manifest.parent.mkdir(parents=True)
             manifest.write_text(json.dumps({
                 "manifest_version":2,"source":str(root/"sessions/missing.jsonl"),"id":"archived-1",
@@ -349,9 +369,9 @@ print(json.dumps({'pid': child.pid, 'url': payload['url']}), flush=True)
 
     def test_broken_link_repairs_only_with_uuid_and_hash_match(self):
         with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as v:
-            root=Path(d); source=root/"sessions/2026/01/01/rollout-child.jsonl"; source.parent.mkdir(parents=True)
+            root=Path(d).resolve(); source=root/"sessions/2026/01/01/rollout-child.jsonl"; source.parent.mkdir(parents=True)
             source.symlink_to("/Volumes/Old Name/Codex Memory Harbor/sessions/rollout-child.jsonl")
-            volume=Path(v); target=volume/"Codex Memory Harbor/sessions/rollout-child.jsonl"; target.parent.mkdir(parents=True)
+            volume=Path(v).resolve(); target=volume/"Codex Memory Harbor/sessions/rollout-child.jsonl"; target.parent.mkdir(parents=True)
             target.write_text("verified payload")
             with harbor.open_catalog(root) as connection:
                 harbor.catalog_upsert(connection,{
@@ -366,9 +386,9 @@ print(json.dumps({'pid': child.pid, 'url': payload['url']}), flush=True)
 
     def test_scan_does_not_repair_links_as_a_side_effect(self):
         with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as v:
-            root=Path(d); source=root/"sessions/2026/01/01/rollout-child.jsonl"; source.parent.mkdir(parents=True)
+            root=Path(d).resolve(); source=root/"sessions/2026/01/01/rollout-child.jsonl"; source.parent.mkdir(parents=True)
             source.symlink_to("/Volumes/Old Name/Codex Memory Harbor/sessions/rollout-child.jsonl")
-            volume=Path(v); target=volume/"Codex Memory Harbor/sessions/rollout-child.jsonl"; target.parent.mkdir(parents=True)
+            volume=Path(v).resolve(); target=volume/"Codex Memory Harbor/sessions/rollout-child.jsonl"; target.parent.mkdir(parents=True)
             target.write_text("verified payload")
             with harbor.open_catalog(root) as connection:
                 harbor.catalog_upsert(connection,{
@@ -385,7 +405,7 @@ print(json.dumps({'pid': child.pid, 'url': payload['url']}), flush=True)
 
     def test_recall_index_keeps_task_evidence_not_inherited_history_or_tools(self):
         with tempfile.TemporaryDirectory() as d:
-            root=Path(d); path=root/"sessions/2026/01/01/rollout-recall.jsonl"; path.parent.mkdir(parents=True)
+            root=Path(d).resolve(); path=root/"sessions/2026/01/01/rollout-recall.jsonl"; path.parent.mkdir(parents=True)
             rows=[
                 {"type":"session_meta","payload":{"id":"recall-1","parent_thread_id":"parent-1","cwd":"/tmp/example","agent_path":"/root/research"}},
                 {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"继承噪声：喜欢红色。"}]}},
@@ -426,7 +446,7 @@ print(json.dumps({'pid': child.pid, 'url': payload['url']}), flush=True)
 
     def test_legacy_child_without_task_boundary_stays_metadata_only(self):
         with tempfile.TemporaryDirectory() as d:
-            root=Path(d); path=root/"sessions/legacy.jsonl"; path.parent.mkdir(parents=True)
+            root=Path(d).resolve(); path=root/"sessions/legacy.jsonl"; path.parent.mkdir(parents=True)
             rows=[
                 {"type":"session_meta","payload":{"id":"legacy-1","parent_thread_id":"parent-1","cwd":"/tmp/example"}},
                 {"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"这是继承的父任务隐私"}]}},
@@ -441,7 +461,7 @@ print(json.dumps({'pid': child.pid, 'url': payload['url']}), flush=True)
 
     def test_recall_survives_missing_source_with_provenance(self):
         with tempfile.TemporaryDirectory() as d:
-            root=Path(d); path=root/"sessions/2026/01/01/rollout-memory.jsonl"; path.parent.mkdir(parents=True)
+            root=Path(d).resolve(); path=root/"sessions/2026/01/01/rollout-memory.jsonl"; path.parent.mkdir(parents=True)
             rows=[
                 {"type":"session_meta","payload":{"id":"memory-1","parent_thread_id":"parent-1","cwd":"/tmp/example","agent_path":"/root/audit"}},
                 {"type":"response_item","payload":{"type":"agent_message","recipient":"/root/audit","content":[{"type":"input_text","text":"Message Type: NEW_TASK\n<input>记录关键研发代号青鸟七号</input>"}]}},
@@ -458,7 +478,7 @@ print(json.dumps({'pid': child.pid, 'url': payload['url']}), flush=True)
 
     def test_recall_critical_path_does_not_probe_external_storage(self):
         with tempfile.TemporaryDirectory() as d:
-            root=Path(d); path=root/"sessions/2026/01/01/rollout-memory.jsonl"; path.parent.mkdir(parents=True)
+            root=Path(d).resolve(); path=root/"sessions/2026/01/01/rollout-memory.jsonl"; path.parent.mkdir(parents=True)
             rows=[
                 {"type":"session_meta","payload":{"id":"memory-1","parent_thread_id":"parent-1","cwd":"/tmp/example","agent_path":"/root/audit"}},
                 {"type":"response_item","payload":{"type":"agent_message","recipient":"/root/audit","content":[{"type":"input_text","text":"Message Type: NEW_TASK\n<input>保留低延迟关键结论</input>"}]}},
@@ -475,7 +495,7 @@ print(json.dumps({'pid': child.pid, 'url': payload['url']}), flush=True)
 
     def test_subagent_record_excludes_inherited_parent_history(self):
         with tempfile.TemporaryDirectory() as d:
-            root=Path(d); path=root/"sessions/2026/01/01/rollout-child-1.jsonl"; path.parent.mkdir(parents=True)
+            root=Path(d).resolve(); path=root/"sessions/2026/01/01/rollout-child-1.jsonl"; path.parent.mkdir(parents=True)
             rows=[
                 {"type":"session_meta","payload":{"id":"child-1","parent_thread_id":"parent-1","cwd":"/tmp/example","agent_path":"/root/audit","agent_nickname":"Gauss"}},
                 {"type":"event_msg","payload":{"type":"agent_message","message":"inherited parent text"}},
@@ -499,7 +519,7 @@ print(json.dumps({'pid': child.pid, 'url': payload['url']}), flush=True)
         self.assertEqual(harbor.compact_task_title("修复时间线拖拽 [89] user: 后续无关消息"),"修复时间线拖拽")
     def test_offload_audit_finalize_restore_cycle(self):
         with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as v:
-            root=Path(d); p=self.fixture(root); volume=Path(v)
+            root=Path(d).resolve(); p=self.fixture(root); volume=Path(v).resolve()
             rows=[json.loads(line) for line in p.read_text().splitlines()]
             rows[0]["payload"]["agent_path"]="/root/test"
             rows.insert(-1,{"type":"response_item","payload":{"type":"agent_message","recipient":"/root/test","content":[{"type":"input_text","text":"Message Type: NEW_TASK"}]}})
@@ -518,7 +538,7 @@ print(json.dumps({'pid': child.pid, 'url': payload['url']}), flush=True)
 
     def test_migrate_reaudits_then_removes_local_backup(self):
         with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as v:
-            root=Path(d); p=self.fixture(root); volume=Path(v); original=p.read_bytes()
+            root=Path(d).resolve(); p=self.fixture(root); volume=Path(v).resolve(); original=p.read_bytes()
             plan={"source":str(p),"destination":str(volume/"Archive/sessions/rollout-test.jsonl"),"backup":str(p)+".offload-local-backup","bytes":p.stat().st_size,"bytes_h":harbor.human_bytes(p.stat().st_size),"sha256":harbor.sha256(p),"id":"child-1","cwd":"/tmp/example","open_handles":0}
             result=harbor.migrate_one(plan,volume,"Archive",root)
             self.assertEqual(result["event"],"migrated_external_primary")
@@ -532,7 +552,7 @@ print(json.dumps({'pid': child.pid, 'url': payload['url']}), flush=True)
 
     def test_migrate_keeps_local_backup_when_reaudit_fails(self):
         with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as v:
-            root=Path(d); p=self.fixture(root); volume=Path(v)
+            root=Path(d).resolve(); p=self.fixture(root); volume=Path(v).resolve()
             plan={"source":str(p),"destination":str(volume/"Archive/sessions/rollout-test.jsonl"),"backup":str(p)+".offload-local-backup","bytes":p.stat().st_size,"bytes_h":harbor.human_bytes(p.stat().st_size),"sha256":harbor.sha256(p),"id":"child-1","cwd":"/tmp/example","open_handles":0}
             with mock.patch.object(harbor,"finalize_one",side_effect=harbor.HarborError("reaudit failed")):
                 with self.assertRaisesRegex(harbor.HarborError,"reaudit failed"):
@@ -543,9 +563,9 @@ print(json.dumps({'pid': child.pid, 'url': payload['url']}), flush=True)
 
     def test_migrate_api_completes_move_without_local_backup(self):
         with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as v:
-            root=Path(d); p=self.fixture(root); volume=Path(v); original=p.read_bytes()
+            root=Path(d).resolve(); p=self.fixture(root); volume=Path(v).resolve(); original=p.read_bytes()
             server=harbor.ThreadingHTTPServer(("127.0.0.1",0),harbor.HarborHandler)
-            server.app={"assets":Path(d),"token":"test-token","codex_home":root,"priority":"","protected_sessions":[],"cache":None,"cache_lock":threading.Lock(),"mutation_lock":threading.Lock()}
+            server.app={"assets":Path(d).resolve(),"token":"test-token","codex_home":root,"priority":"","protected_sessions":[],"cache":None,"cache_lock":threading.Lock(),"mutation_lock":threading.Lock()}
             thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
             request=urllib.request.Request(
                 f"http://127.0.0.1:{server.server_port}/api/migrate",
@@ -554,7 +574,7 @@ print(json.dumps({'pid': child.pid, 'url': payload['url']}), flush=True)
                 method="POST",
             )
             try:
-                with mock.patch.object(harbor,"mounted_volume",return_value=volume):
+                with mock.patch.object(harbor,"mounted_volume",return_value=volume), mock.patch.object(harbor,"volume_identity",return_value={"uuid":"TEST-VOL"}):
                     response=json.loads(urllib.request.urlopen(request,timeout=5).read())
             finally:
                 server.shutdown();server.server_close();thread.join(timeout=5)
@@ -566,9 +586,9 @@ print(json.dumps({'pid': child.pid, 'url': payload['url']}), flush=True)
 
     def test_concurrent_migrate_requests_are_serialized_and_idempotent(self):
         with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as v:
-            root=Path(d); p=self.fixture(root); volume=Path(v); original=p.read_bytes()
+            root=Path(d).resolve(); p=self.fixture(root); volume=Path(v).resolve(); original=p.read_bytes()
             server=harbor.ThreadingHTTPServer(("127.0.0.1",0),harbor.HarborHandler)
-            server.app={"assets":Path(d),"token":"test-token","codex_home":root,"priority":"","protected_sessions":[],"cache":None,"cache_lock":threading.Lock(),"mutation_lock":threading.Lock()}
+            server.app={"assets":Path(d).resolve(),"token":"test-token","codex_home":root,"priority":"","protected_sessions":[],"cache":None,"cache_lock":threading.Lock(),"mutation_lock":threading.Lock()}
             thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
             url=f"http://127.0.0.1:{server.server_port}/api/migrate"
             payload=json.dumps({"paths":[str(p)],"volume":str(volume),"archive_name":"Archive","min_age":14}).encode()
@@ -576,7 +596,7 @@ print(json.dumps({'pid': child.pid, 'url': payload['url']}), flush=True)
                 request=urllib.request.Request(url,data=payload,headers={"Content-Type":"application/json","X-Harbor-Token":"test-token"},method="POST")
                 return json.loads(urllib.request.urlopen(request,timeout=5).read())
             try:
-                with mock.patch.object(harbor,"mounted_volume",return_value=volume):
+                with mock.patch.object(harbor,"mounted_volume",return_value=volume), mock.patch.object(harbor,"volume_identity",return_value={"uuid":"TEST-VOL"}):
                     with ThreadPoolExecutor(max_workers=2) as executor:
                         responses=list(executor.map(lambda _:send(),range(2)))
             finally:

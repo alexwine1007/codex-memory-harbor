@@ -61,6 +61,15 @@ an already verified migration is idempotent success rather than a second destruc
 
 ## Information architecture
 
+The 0.4.5 beta adds a project-storage plan above the history organizer. A saved project
+has two independently accounted parts: working files/media and Runtime history. Old
+ordinary media may be docked behind links at their existing paths; the root, local tooling,
+working documents and existing links remain unchanged. A server-owned frozen plan binds
+each exact source to one volume UUID; unrelated paths and changes require a new plan.
+This is tiered project storage, not portable execution of an entire live workspace.
+File docking defaults to keeping the local rollback and exposes verified restore/release.
+Main-task protection remains in force. See the [project storage contract](skills/codex-memory-harbor/references/project-storage.md).
+
 The organizer is one tree, not separate project and file inspectors:
 
 `Codex storage -> saved project -> task session file`

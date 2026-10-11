@@ -4,6 +4,13 @@
 
 Memory Harbor safely docks old Codex **child-task session logs** on a permanently attached external drive while preserving their original paths through verified symlinks.
 
+0.4.5 beta also docks old project media through the same original-path model. In the
+dashboard, choose a saved project under **项目文件与历史**, review the frozen file plan,
+then select media for docking. Project directories, working documents, scripts and local
+environments remain in place. Local backups are enabled by default; restoration and later
+release are available for receipt-backed media. See the
+[project storage contract](skills/codex-memory-harbor/references/project-storage.md).
+
 Version 0.4 adds a traceable local recall layer on top of the rebuildable catalog and
 stable-volume identity introduced in 0.3.
 External volumes work today,
@@ -37,6 +44,10 @@ Memory Harbor uses a transactional sequence:
 5. retain the local file as a rollback copy while the link is being created;
 6. atomically place an absolute symlink at the original path and independently re-audit it;
 7. for a confirmed migration, automatically delete the verified local rollback and reclaim space.
+
+The current transaction uses exclusive target creation, persistent volume identity checks,
+file/directory fsync, source-change and open-handle checks, and receipt-based independent
+verification before release. Existing link and target equality alone is not proof of integrity.
 
 The dashboard can optionally keep that rollback as a **local backup**. This is a backup-retention choice, not a completed space-reclaiming migration, and the UI labels it accordingly.
 

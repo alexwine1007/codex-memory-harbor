@@ -1,8 +1,8 @@
 # 桌面端与仪表盘
 
 - 状态：当前实现，包含已记录的设计债务
-- 适用版本：Memory Harbor 0.4.4-beta.3（macOS）
-- 最后验证：2026-09-03
+- 适用版本：Memory Harbor 0.4.5-beta.1（macOS）
+- 最后验证：2026-10-12
 
 ## 用途
 
@@ -83,6 +83,11 @@ WKWebView 中的静态 HTML / CSS / JavaScript
 - `POST /api/audit`
 - `POST /api/finalize`
 - `POST /api/restore`
+- `POST /api/project-plan`（按需盘点、生成卷身份绑定的冻结文件方案）
+- `POST /api/project-file-offload`（执行明确选中的单个素材，默认保留本地副本）
+- `POST /api/project-file-restore`（按原始回执恢复单个素材）
+
+项目盘点不加入普通历史扫描；候选素材与历史容量分别显示。素材列表按目录分组、每页 100 项，全选覆盖完整冻结方案。项目方案详情与恢复边界见[项目存储](../../skills/codex-memory-harbor/references/project-storage.md)。
 
 部分 POST 接口本质上偏读取，但仍要求操作令牌。HTTP 方法不是安全等级，底层操作合同才是判断依据。
 

@@ -6,6 +6,8 @@
 
 `scripts/archive_verified_files.py` 是本地维护辅助工具，只迁移用户明确授权的文件清单。它不是 OpenClaw Runtime Adapter，也不保证归档内容能在任何 Runtime 中恢复或继续工作。
 
+0.4.5 beta 保留该命令入口，实现位于随 Skill 安装的 `scripts/archive_files.py`，由维护命令和项目停泊接口共用。项目相对路径清单、默认本地副本、释放与恢复合同见[项目文件停泊](../../skills/codex-memory-harbor/references/project-storage.md)。
+
 安全顺序：检查外置卷 UUID 和文件句柄 → 流式复制并计算源 SHA-256 → 回读外盘校验大小与 SHA-256 → 临时保留本地回滚文件 → 建立原路径的绝对符号链接 → 分别复核链接内容和回滚文件 → 持久化校验记录 → 释放本地实体。
 
 - 默认只展示方案；执行必须显式传入 `--execute`。

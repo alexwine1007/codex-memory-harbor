@@ -224,6 +224,8 @@ Codex、Claude Code 和 OpenClaw 可以作为具体 Harness / Runtime 研究适�
 
 截至 0.4.4-beta.1，实际交付和验收的只有 macOS 上的 Codex Runtime Adapter 与外置卷 Storage Adapter。Claude Code、OpenClaw、DeepSeek 相关 Harness、本地通用目录、网络与云存储都属于候选或未来工作，尚未交付。第二个真实 Runtime Adapter 通过同一合同前，运行时无关核心仍是设计目标，不是已证明的通用能力。
 
+0.4.5-beta.1 增加项目冷素材的逐文件透明停泊：原项目目录和工作文件留在本机，合格素材通过原路径链接读取外部实体；与任务历史分别计量、确认、执行、释放和恢复。这是项目分层存储的 beta，不是新增 Runtime Adapter 或完整活跃工作区移植。真实项目大批量、重启、拔盘重挂载和素材卷改名仍需各自的验收回执。
+
 ## 三个总指标
 
 ### 1. 连续性成功率
