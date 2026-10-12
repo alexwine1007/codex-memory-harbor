@@ -18,7 +18,7 @@ No paid ads, fake accounts, new signup service, automated outreach or tracking p
 
 - [x] Cover/video/docs reviewed; only disposable fixture content visible.
 - [x] Disposable trial and recovery tests pass; source beta limitations prominent. See [local verification](../verification/2026-10-13-launch.md).
-- [ ] Upload social-preview cover in authenticated repo settings; adding the image file alone is insufficient.
+- [x] Upload social-preview cover in authenticated repo settings; adding the image file alone is insufficient. English cover saved and reloaded on 2026-10-13.
 - [ ] Owner approves a particular channel and exact post, then publishes once.
 - [ ] Ask 2–3 consenting testers to try the guide without a live walkthrough. Record where they stop.
 
