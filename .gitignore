@@ -5,3 +5,4 @@ dist/
 .harbor-test/
 *.offload-local-backup
 offload_manifest.jsonl
+docs/launch/frames/

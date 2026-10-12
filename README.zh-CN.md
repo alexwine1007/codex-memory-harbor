@@ -4,6 +4,10 @@
 <p align="center"><strong>空间轻一点，历史留得住。</strong></p>
 <p align="center"><a href="README.md">English</a> · 简体中文<br>macOS 13+ · Python 3.9+ · MIT · 0.4.6 beta</p>
 
+![给当下腾空间，把过去留得住](docs/launch/social-preview.zh-CN.png)
+
+<p align="center"><a href="docs/launch/TRY.md">安全试用</a> · <a href="https://github.com/alexwine1007/codex-memory-harbor/releases/tag/v0.4.6-beta.3">30 秒操作导览</a> · <a href="https://github.com/alexwine1007/codex-memory-harbor/issues/new?template=beta_feedback.yml">内测反馈</a></p>
+
 记忆港把符合条件的 **Codex 已完成子任务历史和项目冷素材** 停泊到外置硬盘，逐个验证副本，并用符号链接保留原文件路径。腾出空间，同时保留过去工作的证据和出处。
 
 **本地优先，无需账号、订阅、遥测或上传云端。** 桌面小卡片用到时打开同一个工作台，支持中文、英文。
@@ -35,6 +39,8 @@ python3 skills/codex-memory-harbor/scripts/harbor.py serve --open
 ```
 
 服务只监听 `127.0.0.1`。扫描、查看方案、取消确认都不会迁移文件。项目素材只在你点击盘点时扫描，不后台遍历硬盘。
+
+**不想一开始就碰真实历史？** 可以先做[临时样例试用](docs/launch/TRY.md#2-disposable-byte-transaction-trial)：工具自己创建 128 KiB 样例，走完生产底层的校验迁移、原路径读取和恢复。运行 `python3 scripts/try_harbor.py` 只打印方案，不创建样例或操作文件；加明确执行参数后才开始。无需注册，也不做遥测。
 
 ## 从源码安装 Mac App
 
@@ -96,6 +102,8 @@ node --check skills/codex-memory-harbor/assets/dashboard/app.js
 ```
 
 欢迎翻译、恢复测试、可访问性和独立存储介质验收贡献。先读 [CONTRIBUTING.md](CONTRIBUTING.md)，问题反馈中不要上传私人对话、凭据或未脱敏路径；敏感问题参见 [SECURITY.md](SECURITY.md)。
+
+**招募 5–10 位真正遇到 Mac/Codex 空间问题的内测者。** 欢迎告诉我们哪一步不易理解、临时样例恢复是否顺利；克隆和 Star 不算真实使用结果。[安全试用与反馈](docs/launch/TRY.md) · [双语发布准备包](docs/launch/README.zh-CN.md)。
 
 首页结构参考 [LocalSend](https://github.com/localsend/localsend) 的截图、多语言和安装入口，以及 [restic](https://github.com/restic/restic) 的快速开始与可验证性说明；本项目与它们及 OpenAI 无隶属关系。
 

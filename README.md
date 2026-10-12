@@ -4,6 +4,10 @@
 <p align="center"><strong>Reclaim space. Keep the history behind your AI work.</strong></p>
 <p align="center">English · <a href="README.zh-CN.md">简体中文</a><br>macOS 13+ · Python 3.9+ · MIT · 0.4.6 beta</p>
 
+![Reclaim space. Keep your history.](docs/launch/social-preview.en.png)
+
+<p align="center"><a href="docs/launch/TRY.md">Try safely</a> · <a href="https://github.com/alexwine1007/codex-memory-harbor/releases/tag/v0.4.6-beta.3">30-second walkthrough</a> · <a href="https://github.com/alexwine1007/codex-memory-harbor/issues/new?template=beta_feedback.yml">Give beta feedback</a></p>
+
 Memory Harbor moves eligible, completed **Codex child-task histories and cold project media** to an external drive, verifies every copy, and keeps the original file paths working through symlinks. Find past work through a small local index instead of deleting your evidence to free space.
 
 **Local-first. No account, subscription, telemetry or cloud upload.** A compact native desktop card opens a single, bilingual workbench when you need it.
@@ -35,6 +39,8 @@ python3 skills/codex-memory-harbor/scripts/harbor.py serve --open
 ```
 
 The dashboard listens only on `127.0.0.1`. Scanning, opening a plan and cancelling confirmation do not migrate your files. Media inventory is on demand, not a background recursive scan.
+
+**Prefer to try without touching private history?** See the [disposable sample trial](docs/launch/TRY.md#2-disposable-byte-transaction-trial). A 128 KiB sample exercises verified docking, original-path reading and restore through the production byte core. Start with `python3 scripts/try_harbor.py` to print a non-mutating plan. No signup or telemetry.
 
 ## Install the Mac app from source
 
@@ -98,6 +104,8 @@ node --check skills/codex-memory-harbor/assets/dashboard/app.js
 ```
 
 Contributions are especially welcome for translation, safe recovery tests, accessibility and independent storage-device validation. Start with [CONTRIBUTING.md](CONTRIBUTING.md). Please redact paths, personal conversations and secrets from issues. See [SECURITY.md](SECURITY.md) for sensitive reports.
+
+**Looking for 5–10 early testers** with real Mac/Codex storage pressure. Tell us the first confusing step and whether sample restoration worked; a clone or star is not a usage result. [Safe trial and feedback](docs/launch/TRY.md) · [Bilingual launch kit](docs/launch/README.md).
 
 The README structure was informed by [LocalSend](https://github.com/localsend/localsend) (screenshots, languages, installation) and [restic](https://github.com/restic/restic) (quick start and verifiability). Memory Harbor is not affiliated with either project or OpenAI.
 

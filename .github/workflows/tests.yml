@@ -12,6 +12,8 @@ jobs:
       - name: JavaScript syntax
         run: |
           for file in skills/codex-memory-harbor/assets/dashboard/*.js; do node --check "$file"; done
+          node --check scripts/render_launch.mjs
+          node --check scripts/render_walkthrough.mjs
       - name: Native source typecheck
         run: |
           xcrun swiftc -typecheck macos/CodexMemoryHarbor.swift -framework Cocoa

@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" role="img" aria-label="Memory Harbor">
+ <defs><radialGradient id="ambient"><stop stop-color="#32346c" stop-opacity=".65"/><stop offset="1" stop-color="#101421" stop-opacity="0"/></radialGradient><linearGradient id="line"><stop stop-color="#936cff"/><stop offset="1" stop-color="#12cfda"/></linearGradient></defs>
+ <rect width="1280" height="640" fill="#101421"/><ellipse cx="1070" cy="275" rx="370" ry="375" fill="url(#ambient)"/>
+ <g font-family="-apple-system, BlinkMacSystemFont, 'PingFang SC', 'Helvetica Neue', sans-serif">
+ <text x="72" y="95" font-size="27" font-weight="600" letter-spacing="2" fill="#e3e1fa">MEMORY HARBOR</text>
+ <rect x="72" y="130" width="46" height="4" rx="2" fill="url(#line)"/>
+ <text x="68" y="266" font-size="70" font-weight="700" letter-spacing="-2" fill="#faf9ff">Reclaim space.</text>
+ <text x="68" y="351" font-size="70" font-weight="700" letter-spacing="-2" fill="#faf9ff">Keep your history.</text>
+ <text x="72" y="423" font-size="29" fill="#cac7e0">Verified copies. Original paths.</text>
+ <text x="72" y="466" font-size="21" fill="#9294ad">Old Codex child-task logs + cold media → external drive</text>
+ <path d="M72 545H1208" stroke="#8186a1" stroke-opacity=".25"/>
+ <text x="72" y="589" font-size="20" fill="#bbbace">macOS · MIT · Local-first</text>
+ <text x="1208" y="589" text-anchor="end" font-size="16" fill="#9294ad">SOURCE BETA · DRIVE REQUIRED</text>
+ </g><svg x="948" y="196" width="238" height="238" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title">
+  <title id="title">Memory Harbor</title>
+  <defs>
+    <linearGradient id="surface" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#0b122e"/><stop offset="1" stop-color="#03081d"/>
+    </linearGradient>
+    <linearGradient id="harbor" x1="60" y1="100" x2="196" y2="176" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#9264ff"/><stop offset=".48" stop-color="#617cff"/><stop offset="1" stop-color="#00c6e7"/>
+    </linearGradient>
+  </defs>
+  <!-- Transparent corners. No white matte, outside stroke, shadow or nested frame. -->
+  <rect width="256" height="256" rx="56" fill="url(#surface)"/>
+  <path d="M70 96v44c0 23 15 37 38 37h40c23 0 38-14 38-37V96" fill="none" stroke="url(#harbor)" stroke-width="21" stroke-linecap="round"/>
+  <circle cx="128" cy="130" r="10" fill="#fffaf3"/>
+</svg>
+</svg>

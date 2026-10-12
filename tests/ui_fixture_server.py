@@ -5,6 +5,7 @@ import threading
 import os
 import sqlite3
 import time
+from types import SimpleNamespace
 from unittest import mock
 from test_project_storage import ProjectStorageTests, harbor, archive
 
@@ -44,6 +45,7 @@ def main():
              mock.patch.object(harbor, 'volume_identity', return_value={'uuid':'TEST-VOL'}), \
              mock.patch.object(harbor, 'verify_external_volume'), \
              mock.patch.object(harbor, 'available_volumes', return_value=[volume]), \
+             mock.patch.object(harbor.shutil, 'disk_usage', return_value=SimpleNamespace(total=256*1024**3, used=240*1024**3, free=16*1024**3)), \
              mock.patch.object(harbor, 'project_archive_module', return_value=archive):
             print('http://127.0.0.1:%s/' % server.server_port, flush=True)
             try: server.serve_forever()
