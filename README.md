@@ -8,7 +8,9 @@
 
 <p align="center"><a href="docs/launch/TRY.md">Try safely</a> · <a href="https://github.com/alexwine1007/codex-memory-harbor/releases/tag/v0.4.6-beta.3">30-second walkthrough</a> · <a href="https://github.com/alexwine1007/codex-memory-harbor/issues/new?template=beta_feedback.yml">Give beta feedback</a></p>
 
-Memory Harbor moves eligible, completed **Codex child-task histories and cold project media** to an external drive, verifies every copy, and keeps the original file paths working through symlinks. Find past work through a small local index instead of deleting your evidence to free space.
+Memory Harbor aims to turn an **always-connected USB flash drive or external SSD/HDD** into an extension of your Mac's storage. It moves eligible, completed **Codex child-task histories and cold project media**, verifies every copy, and keeps their original paths working while the drive is connected. Codex can read migrated content through those paths for evidence review and references in later work—not merely keep an unused export.
+
+The goal is **to reclaim local space without disconnecting future development from past work**. Active main tasks, code, working documents and runtime environments stay local; running tasks are not relocated to removable storage.
 
 **Local-first. No account, subscription, telemetry or cloud upload.** A compact native desktop card opens a single, bilingual workbench when you need it.
 
@@ -18,10 +20,20 @@ Memory Harbor moves eligible, completed **Codex child-task histories and cold pr
 
 - **Long-running AI development:** completed child agents leave large logs, but their decisions and provenance still matter.
 - **AI film, design and research projects:** move old eligible media without changing references in your local project. Code, documents and environments stay local.
-- **A small Mac SSD plus an always-connected external SSD:** select a batch once, review the exact plan, verify and reclaim local file space.
+- **A small Mac SSD plus an always-connected USB flash drive or external SSD/HDD:** select a batch once, review the exact plan, verify and reclaim local file space. Speed and reliability vary; validate disposable samples on each new medium first.
 - **Finding old evidence:** search indexed task titles and selected outward reports even when the drive is offline; reconnect to read originals.
 
 Not a cache cleaner, whole-workspace mover, general backup system or promise that Codex automatically remembers every old conversation.
+
+## Can Codex still use migrated content?
+
+**Reading and reusing history has real small-scale evidence; direct continuation of every old task is not a blanket guarantee.**
+
+- **One-task pilot, 2026-09-02:** after docking on an exFAT volume, Codex read an unloaded history by task id and paged into earlier turns. It read the same task after a full Codex quit/restart and again after safe drive eject/disconnect/remount at the original mount path.
+- **Ten histories, 2026-09-03:** after verification and local-copy release, Codex cold-read all ten external-only histories. This batch did not receive separate restart/remount acceptance.
+- **Continuation limit:** old multi-agent child tasks could be read but could not directly resume because of a Codex child-task hydration restriction; use the owning parent task. Active main tasks remain local. Original-path media reads do not prove arbitrary editor hot reload or whole-project continuation.
+
+See [tested boundaries](skills/codex-memory-harbor/references/tested-boundaries.md) and [this clarification audit](docs/verification/2026-10-13-runtime-continuity.md). These observations cover specific machines, drives and then-current Codex versions, not every USB drive or blanket compatibility with today's runtime. Disconnected originals are unavailable.
 
 ## See it
 

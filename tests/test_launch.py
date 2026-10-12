@@ -118,6 +118,24 @@ class TrialTests(unittest.TestCase):
 
 
 class LaunchContracts(unittest.TestCase):
+    def test_public_introductions_separate_reads_from_task_continuation(self):
+        expectations = {
+            'README.zh-CN.md': ('长期外挂的 U 盘或移动硬盘', '所有旧任务直接继续运行', '尚不能统一承诺', '2026-09-02', '2026-09-03'),
+            'README.md': ('USB flash drive or external SSD/HDD', 'direct continuation of every old task', 'not a blanket guarantee', '2026-09-02', '2026-09-03'),
+        }
+        for name, phrases in expectations.items():
+            text = (ROOT / name).read_text()
+            for phrase in phrases:
+                self.assertIn(phrase, text)
+            self.assertIn('docs/verification/2026-10-13-runtime-continuity.md', text)
+            self.assertIn('skills/codex-memory-harbor/references/tested-boundaries.md', text)
+        evidence = (ROOT / 'docs/verification/2026-10-13-runtime-continuity.md').read_text()
+        self.assertIn('thread/items/list is not supported yet', evidence)
+        self.assertIn('not a native Codex resume test', evidence)
+        for name in ('README.md', 'README.zh-CN.md', 'POSTS.md'):
+            text = (ROOT / 'docs/launch' / name).read_text()
+            self.assertIn('USB flash drive' if name == 'README.md' else 'U 盘', text)
+
     def test_walkthroughs_are_thirty_seconds_and_capture_mime_matches(self):
         renderer = (ROOT / 'scripts/render_walkthrough.mjs').read_text()
         self.assertIn('data:image/jpeg;base64,', renderer)

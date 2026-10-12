@@ -2,7 +2,9 @@
 
 [简体中文](README.zh-CN.md) · [Safe first trial](TRY.md) · [Ready-to-edit posts](POSTS.md) · [Two-week checklist](PLAN.md)
 
-**Codex histories filling your Mac? Move eligible old child-task logs and cold media to an external drive, verify the copies, and keep their original paths readable while the drive is connected.**
+**Codex histories filling your Mac? Extend local storage with an always-connected USB flash drive or external SSD/HDD, verify migrated old logs and cold media, and keep original paths readable for evidence review and later work.**
+
+Real small-scale experiments cover Codex reads of external histories, including restart and safe remount for a one-task pilot. This does not establish that every old child agent can directly resume; keep the [read-versus-continuation distinction](../../README.md#can-codex-still-use-migrated-content).
 
 Memory Harbor is a third-party, macOS-only source beta. It is not an official Codex integration, a whole-workspace mover, a second backup, or automatic memory for every conversation. Start with the read-only scan or disposable trial; keep local copies on a new machine/drive until you validate restart, remount and recovery.
 

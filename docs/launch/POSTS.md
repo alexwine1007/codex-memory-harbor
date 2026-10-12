@@ -4,9 +4,9 @@
 
 ## One line / 一句话
 
-**EN:** Codex histories filling your Mac? Dock eligible old logs and cold media on an external drive, verify the copies, and keep original paths readable while connected.
+**EN:** Codex histories filling your Mac? Dock eligible old logs and cold media on an always-connected USB flash drive or external SSD/HDD, verify the copies, and keep original paths readable for later work.
 
-**中文：** Codex 的旧子任务和素材占满了 Mac？安全搬到外盘，外盘在线时仍能沿原路径读取。
+**中文：** Codex 的旧子任务和素材占满了 Mac？用长期外挂的 U 盘或移动硬盘安全迁移，外盘在线时仍能沿原路径读取，供后续工作引用。
 
 ## Chinese developer community / 中文开发者社区
 
@@ -14,7 +14,9 @@
 
 长期使用 Codex、子代理和 AI 制作工具，历史和素材会越积越多。直接删掉又怕丢研发证据。我们做了 Memory Harbor（记忆港），想解决这个具体问题。
 
-它只推荐符合条件的已完成子任务和冷素材；你查看清单并确认后，工具复制到外盘、逐个校验，再用链接保留原路径。外盘在线时继续沿原入口读取，想放回本机也有校验后的恢复流程。项目代码、环境和活跃主任务不搬。
+它只推荐符合条件的已完成子任务和冷素材；你查看清单并确认后，工具复制到长期外挂的 U 盘或移动硬盘、逐个校验，再用链接保留原路径。外盘在线时继续沿原入口读取，供后续工作引用，想放回本机也有校验后的恢复流程。项目代码、环境和活跃主任务不搬。
+
+做过真实的小规模 Codex 历史读取验证，单条试点还通过了 Codex 重启和硬盘安全重挂载后的再次读取。但读取历史不等于每个旧子任务都能直接重新运行；旧版多代理子任务有恢复运行限制。不同 U 盘、硬盘和 Codex 版本仍需分别验收。
 
 目前是 macOS 第三方源码 Beta，MIT 开源，支持中文/英文，不上传历史、不做遥测。没有公开公证安装包，需从源码安装。拔盘时原件不可读；它不是额外备份，也不保证 Codex 自动记住所有旧对话。
 
@@ -30,7 +32,9 @@
 
 **Title:** Show HN: Memory Harbor – dock old Codex logs on an external drive
 
-I built Memory Harbor for a small Mac SSD and long-running AI work. Instead of deleting completed child-agent logs and cold media, it verifies copies on an external drive and keeps original paths working through symlinks while the drive is connected.
+I built Memory Harbor for a small Mac SSD and long-running AI work. Instead of deleting completed child-agent logs and cold media, it verifies copies on an always-connected USB flash drive or external SSD/HDD and keeps original paths working through symlinks for later work.
+
+Real small-scale evidence covers Codex reading migrated histories; a one-task pilot also covered restart and safe remount. Reading history is not a blanket direct-resume claim for old child agents, whose runtime restrictions remain in place.
 
 This is a third-party macOS source beta, not an official Codex storage integration. It protects main/active histories, uses fresh volume and file checks, and supports receipt-backed restoration. There is no account, telemetry, cloud upload, or public notarized installer. An external drive is not a second backup, and disconnected originals are unavailable.
 
@@ -44,7 +48,7 @@ Trial: https://github.com/alexwine1007/codex-memory-harbor/blob/main/docs/launch
 
 ## Short introduction / 简短介绍
 
-开源小工具 Memory Harbor：Mac 空间不够时，把合格的 Codex 旧子任务和冷素材校验后放到外盘，外盘在线时保留原路径读取，也可以恢复。macOS 源码 Beta，中文/英文，无遥测。先只读盘点或用临时样例试用，不必先迁移真实历史。维护者正在找实际有这个痛点的内测者： https://github.com/alexwine1007/codex-memory-harbor
+开源小工具 Memory Harbor：Mac 空间不够时，把合格的 Codex 旧子任务和冷素材校验后放到长期外挂的 U 盘或移动硬盘，外盘在线时保留原路径读取，供后续工作引用，也可以恢复。可读取不等于所有旧子任务可直接续跑。macOS 源码 Beta，中文/英文，无遥测。先只读盘点或用临时样例试用，不必先迁移真实历史。维护者正在找实际有这个痛点的内测者： https://github.com/alexwine1007/codex-memory-harbor
 
 ## Personal invitation — consent first / 内测邀请
 
