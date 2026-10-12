@@ -22,6 +22,7 @@ final class DashboardDelegate: NSObject, NSApplicationDelegate, WKNavigationDele
         let frame = NSRect(x: visible.midX - width / 2, y: visible.midY - height / 2, width: width, height: height)
         window = NSWindow(contentRect: frame, styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
         window.title = "Memory Harbor"
+        window.titleVisibility = .hidden
         window.minSize = NSSize(width: min(760, width), height: min(620, height))
         window.titlebarAppearsTransparent = true
         window.isOpaque = true

@@ -1,6 +1,6 @@
 [project]
 name = "memory-harbor"
-version = "0.4.6b1"
+version = "0.4.6b2"
 description = "Reclaim Mac storage without losing AI work history: verified external-drive docking, original paths, local recall."
 readme = "README.md"
 requires-python = ">=3.9"

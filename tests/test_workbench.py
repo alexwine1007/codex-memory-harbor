@@ -95,7 +95,15 @@ assert.equal(p.state(job,n=>n+' B',(k,v)=>i.translate('en',k,v)).percent,100);
         self.assertNotIn('Timer.', native)
         build = (ROOT / 'scripts/build_macos_app.sh').read_text()
         self.assertIn('for language in en zh-Hans', build)
-        self.assertIn('0.4.6-beta.1', build)
+        self.assertIn('0.4.6-beta.2', build)
+
+    def test_workbench_does_not_nest_a_card_inside_the_native_window(self):
+        css = (ASSETS / 'styles.css').read_text()
+        helper = (ROOT / 'macos/CodexMemoryHarborDashboard.swift').read_text()
+        self.assertIn('window.titleVisibility = .hidden', helper)
+        self.assertIn('.workbench{width:100%;min-height:100vh;margin:0;border:0;border-radius:0;background:none;box-shadow:none', css)
+        self.assertIn('padding:32px 20px 20px;border-radius:0', css)
+        self.assertNotIn('width:min(980px,100%)', css)
 
     def test_manual_fixture_settings_cannot_touch_real_preferences(self):
         fixture = (ROOT / 'tests/ui_fixture_server.py').read_text()

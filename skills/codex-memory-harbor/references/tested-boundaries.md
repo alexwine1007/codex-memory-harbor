@@ -105,3 +105,8 @@ Do not describe unverified cases as supported. On a new machine or storage devic
 - Signed builds, strict installed verification and source/installed-Skill comparison passed. The installed helper rendered live read-only capacity/candidates; returning to desktop rendered 205/205 accessible histories on the native-material card. Native WebKit select sizing was visually checked and corrected. Official Skill validation remained unavailable due to missing PyYAML; independent YAML/frontmatter validation passed.
 - The read-only index benchmark measured 2.216 ms p95 over 40 iterations; a 778-session metadata scan took 2.459 seconds. These are not transfer-time interaction or CPU/memory guarantees. No idle progress poll or decorative animation loop was introduced.
 - This release does not newly verify private full batches, physical remount, Codex cold resume, arbitrary active workspaces, cloud storage or automatic associative memory. Detailed evidence and source-beta packaging limits: `docs/verification/0.4.6-beta.1.md`.
+
+## Single window surface correction, 2026-10-12
+
+- 0.4.6-beta.2 removes the nested workbench card and duplicate visible native title after installed-window feedback. The actual installed helper was visually reviewed, along with bilingual browser demo screenshots and a 390-pixel layout.
+- 108 local tests passed with disposable attached-volume verification enabled; Swift typechecks, signed build, strict installed signature and source/installed-Skill comparison passed. Only presentation changed; no private storage operation occurred. Details: `docs/verification/0.4.6-beta.2.md`.
