@@ -110,3 +110,8 @@ Do not describe unverified cases as supported. On a new machine or storage devic
 
 - 0.4.6-beta.2 removes the nested workbench card and duplicate visible native title after installed-window feedback. The actual installed helper was visually reviewed, along with bilingual browser demo screenshots and a 390-pixel layout.
 - 108 local tests passed with disposable attached-volume verification enabled; Swift typechecks, signed build, strict installed signature and source/installed-Skill comparison passed. Only presentation changed; no private storage operation occurred. Details: `docs/verification/0.4.6-beta.2.md`.
+
+## Readable task labels and transparent logo, 2026-10-13
+
+- 0.4.6-beta.3 adds visible-row-only, bounded and locally cached task labels. Empty titles use actual assigned child-task names; descriptions come from that task's instruction or outward report after a trustworthy task boundary. Encrypted instructions are not decrypted. Missing information remains explicit, and source lines are available in details.
+- 121 local tests passed with the disposable attached-volume regression enabled. Browser checks covered bilingual UI, descriptions, reports, provenance and the 390-pixel layout; no private history was migrated or released. The shared vector logo and native raster derivative have transparent corners, without a white matte. Details: `docs/verification/0.4.6-beta.3.md`.

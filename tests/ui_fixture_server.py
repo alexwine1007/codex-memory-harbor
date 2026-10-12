@@ -2,6 +2,9 @@
 import json
 from pathlib import Path
 import threading
+import os
+import sqlite3
+import time
 from unittest import mock
 from test_project_storage import ProjectStorageTests, harbor, archive
 
@@ -12,6 +15,23 @@ def main():
     # Replace it with a real reader/writer bound strictly to disposable preferences.
     fixture.config.stop()
     try:
+        # Blank index titles reproduce the user's case without publishing private history.
+        with sqlite3.connect(fixture.home/'state_5.sqlite') as connection:
+            connection.execute('CREATE TABLE threads (id TEXT, rollout_path TEXT, title TEXT, preview TEXT, cwd TEXT, created_at INTEGER, updated_at INTEGER, created_at_ms INTEGER, updated_at_ms INTEGER, agent_nickname TEXT)')
+            for index,(name,description) in enumerate((
+                ('video_continuity_check','检查短片角色与镜头的连续性。保留验收记录。'),
+                ('avatar_art_direction','检查头像构图与圆形裁切后的辨识度。给出配色建议。'),
+                ('storage_research','比较外盘读写策略并记录测试结果。没有修改任何真实文件。'))):
+                thread_id=f'demo-task-{index}';agent=f'/root/{name}'
+                path=fixture.home/'sessions'/f'rollout-{thread_id}.jsonl'
+                path.parent.mkdir(exist_ok=True)
+                path.write_text('\n'.join(json.dumps(row,ensure_ascii=False) for row in (
+                    {'type':'session_meta','payload':{'id':thread_id,'parent_thread_id':'demo-parent','source':{'subagent':{'thread_spawn':{}}},'agent_path':agent,'cwd':str(fixture.project)}},
+                    {'type':'response_item','payload':{'type':'agent_message','recipient':agent,'content':[{'type':'input_text','text':f'Message Type: NEW_TASK\nTask name: {agent}\nPayload:\n<input>{description}</input>'}]}},
+                    {'type':'response_item','payload':{'type':'message','role':'assistant','channel':'final','content':[{'type':'output_text','text':description}]}},
+                    {'type':'event_msg','payload':{'type':'task_complete'}}))+'\n')
+                os.utime(path,(time.time()-40*86400,time.time()-40*86400))
+                connection.execute('INSERT INTO threads VALUES (?,?,?,?,?,?,?,?,?,?)',(thread_id,str(path),'','',str(fixture.project),1,2,None,None,'Demo'))
         (fixture.home/'.codex-global-state.json').write_text(json.dumps({'local-projects': {
             'fixture-project': {'name':'Demo media project', 'rootPaths':[str(fixture.project)]}}}))
         volume = {'path':str(fixture.volume), 'name':'Demo drive', 'writable':True, 'free':1024**3, 'free_h':'1 GB', 'uuid':'TEST-VOL'}

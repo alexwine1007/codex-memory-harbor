@@ -28,12 +28,16 @@ from collections import deque
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "0.4.6-beta.2"
+VERSION = "0.4.6-beta.3"
 DEFAULT_ARCHIVE = "Memory Harbor"
 LEGACY_ARCHIVES = ("Codex Memory Harbor",)
-CATALOG_SCHEMA_VERSION = 3
+CATALOG_SCHEMA_VERSION = 4
+TASK_LABEL_VERSION = 1
+TASK_LABEL_READ_BYTES = 2 * 1024 * 1024
+TASK_LABEL_LINE_BYTES = 256 * 1024
+TASK_LABEL_BATCH_SIZE = 4
 MANIFEST_SCHEMA_VERSION = 2
-RECALL_EXTRACTION_VERSION = 1
+RECALL_EXTRACTION_VERSION = 2
 RECALL_CHUNK_CHARS = 6000
 RECALL_CHUNK_OVERLAP = 240
 RECALL_MAX_FRAGMENTS_PER_SESSION = 5000
@@ -363,26 +367,33 @@ def compact_task_title(value: str | None) -> str:
 
 def agent_task_title(agent_path: str | None) -> str:
     leaf = str(agent_path or "").strip().rstrip("/").split("/")[-1]
-    return clean_index_text(leaf.replace("_", " ").replace("-", " "), 72)
+    return clean_index_text(clean_recall_text(leaf.replace("_", " ").replace("-", " ")), 72)
 
 
 def load_thread_catalog(codex_home: Path) -> dict:
     """Load display titles from Codex's index without reading session bodies."""
+    labels = {}
+    with read_catalog(codex_home) as connection:
+        if connection:
+            try:
+                labels = {row["thread_id"]: dict(row) for row in connection.execute("SELECT * FROM harbor_task_labels")}
+            except sqlite3.Error:
+                pass  # A version-3 catalog has no display-label cache yet.
     database = state_database(codex_home)
     if not database:
-        return {"by_id": {}, "by_path": {}}
+        return {"by_id": {}, "by_path": {}, "labels": labels}
     try:
         with read_only_database(database) as connection:
             rows = connection.execute("SELECT id, rollout_path, title, agent_nickname FROM threads").fetchall()
     except (OSError, sqlite3.Error):
-        return {"by_id": {}, "by_path": {}}
+        return {"by_id": {}, "by_path": {}, "labels": labels}
     by_id, by_path = {}, {}
     for row in rows:
-        value = {"id": str(row["id"]), "title": compact_task_title(row["title"]), "agent_nickname": str(row["agent_nickname"] or "").strip()}
+        value = {"id": str(row["id"]), "title": compact_task_title(row["title"]), "agent_nickname": str(row["agent_nickname"] or "").strip(), "rollout_path": str(row["rollout_path"] or "")}
         by_id[value["id"]] = value
         if row["rollout_path"]:
             by_path[str(Path(row["rollout_path"]).expanduser().absolute())] = value
-    return {"by_id": by_id, "by_path": by_path}
+    return {"by_id": by_id, "by_path": by_path, "labels": labels}
 
 
 def open_catalog(codex_home: Path) -> sqlite3.Connection:
@@ -421,6 +432,14 @@ def open_catalog(codex_home: Path) -> sqlite3.Connection:
     """)
     connection.execute("CREATE INDEX IF NOT EXISTS harbor_items_thread_id ON harbor_items(thread_id)")
     connection.execute("CREATE INDEX IF NOT EXISTS harbor_items_project_id ON harbor_items(project_id)")
+    connection.execute("""
+        CREATE TABLE IF NOT EXISTS harbor_task_labels (
+            thread_id TEXT PRIMARY KEY, source_path TEXT NOT NULL,
+            signature TEXT NOT NULL, version INTEGER NOT NULL,
+            title TEXT NOT NULL DEFAULT '', summary TEXT NOT NULL DEFAULT '',
+            summary_source TEXT NOT NULL DEFAULT '', source_line INTEGER NOT NULL DEFAULT 0
+        )
+    """)
     connection.execute("""
         CREATE TABLE IF NOT EXISTS harbor_fragments (
             fragment_id TEXT PRIMARY KEY,
@@ -802,8 +821,9 @@ def recall_fragments_from_session(path: Path) -> list[dict]:
             if not started:
                 continue
             if agent_path:
-                if value.get("type") == "event_msg" and payload.get("type") == "agent_message":
-                    raw_fragments.append(("assistant", str(payload.get("message") or ""), line_number, value.get("timestamp")))
+                report = outward_report(value)
+                if report:
+                    raw_fragments.append(("assistant", report, line_number, value.get("timestamp")))
                 continue
             if value.get("type") != "response_item" or payload.get("type") != "message":
                 continue
@@ -1115,9 +1135,139 @@ def rebuild_catalog(codex_home: Path, min_age: float = 30, priority=None, protec
 
 def attach_thread_title(item: dict, catalog: dict) -> None:
     thread = catalog["by_id"].get(str(item.get("id") or "")) or catalog["by_path"].get(str(Path(item["path"]).absolute()))
+    offline = item.get("linked") and not item.get("target_exists")
+    if offline and not item.get("id"):
+        # Display-only recovery from the index; unreadable sources remain ineligible.
+        item["id"] = (thread or {}).get("id") or next((key for key, label in catalog.get("labels", {}).items() if label["source_path"] == item["path"]), None)
     indexed = thread["title"] if thread and thread.get("title") else None
     generic = indexed and indexed.strip().lower() in {"hello", "hi", "你好"}
-    item["title"] = agent_task_title(item.get("agent_path")) if generic and item.get("agent_path") else indexed
+    item["title"] = clean_index_text(clean_recall_text(indexed or ""), 72) if indexed and not generic else agent_task_title(item.get("agent_path"))
+    label = catalog.get("labels", {}).get(str(item.get("id") or ""))
+    if label and label["version"] == TASK_LABEL_VERSION and label["source_path"] == item["path"] and (offline or label["signature"] == item.get("label_signature")):
+        item["title"] = item["title"] or label["title"]
+        item["summary"] = label["summary"]
+        item["summary_source"] = label["summary_source"]
+        item["task_label_ready"] = True
+
+
+def validate_thread_id(thread_id: str) -> None:
+    allowed = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
+    if not thread_id or len(thread_id) > 128 or any(char not in allowed for char in thread_id):
+        raise HarborError("任务 ID 无效")
+
+
+def task_label_signature(path: Path) -> str:
+    info = path.stat()
+    return f"{info.st_size}:{info.st_mtime_ns}:{info.st_ctime_ns}"
+
+
+def task_summary(value: str | None) -> str:
+    """An extract, not a generated interpretation. Never keep credentials or URLs."""
+    text = clean_recall_text(value or "")
+    text = re.sub(r"```.*?```", "", text, flags=re.DOTALL)
+    text = re.sub(r"!?\[([^\]]+)\]\([^)]+\)", r"\1", text)
+    text = re.sub(r"https?://\S+", "", text)
+    text = re.sub(r"(?m)^\s*(?:#{1,6}\s+|[-*•]\s+|\d+[.)、]\s+)", "", text)
+    text = clean_index_text(text.replace("**", "").replace("`", ""))
+    sentence = re.split(r"(?<=[。！？!?])\s*|(?<=\.)\s+", text, maxsplit=1)[0]
+    return clean_index_text(sentence, 160)
+
+
+def outward_report(value: dict) -> str:
+    payload = value.get("payload") or {}
+    if value.get("type") == "event_msg" and payload.get("type") == "agent_message":
+        return str(payload.get("message") or "")
+    if value.get("type") == "response_item" and payload.get("type") == "message" and payload.get("role") == "assistant" and payload.get("channel") != "analysis":
+        return payload_text(payload)
+    return ""
+
+
+def bounded_task_summary(path: Path, metadata: dict) -> dict:
+    """Read at most 2 MiB/256 KiB per line, only after this child's own boundary."""
+    agent_path = metadata.get("agent_path")
+    if not metadata.get("parent_thread_id") or not agent_path:
+        return {"summary": "", "summary_source": "unavailable", "source_line": 0}
+    started, number = False, 0
+    source_size = path.stat().st_size
+    with path.open("rb") as stream:
+        while stream.tell() < TASK_LABEL_READ_BYTES:
+            remaining = TASK_LABEL_READ_BYTES - stream.tell()
+            raw = stream.readline(min(TASK_LABEL_LINE_BYTES, remaining))
+            if not raw:
+                break
+            number += 1
+            if not raw.endswith(b"\n") and not (stream.tell() == source_size and len(raw) < TASK_LABEL_LINE_BYTES):
+                # Skip the rest of an oversized line without decoding it or treating
+                # its suffix as a fresh record. Its bytes still count toward the cap.
+                while raw and not raw.endswith(b"\n") and stream.tell() < TASK_LABEL_READ_BYTES:
+                    raw = stream.readline(min(TASK_LABEL_LINE_BYTES, TASK_LABEL_READ_BYTES - stream.tell()))
+                continue
+            line = raw.decode("utf-8", errors="replace")
+            if not recall_candidate_line(line):
+                continue
+            try:
+                value = json.loads(line)
+            except (ValueError, TypeError):
+                continue
+            payload = value.get("payload") or {}
+            if not started:
+                if value.get("type") != "response_item" or payload.get("type") != "agent_message" or payload.get("recipient") != agent_path:
+                    continue
+                marker = payload_text(payload)
+                if "Message Type: NEW_TASK" not in marker:
+                    continue
+                started = True
+                match = re.search(r"<input>(.*?)</input>", marker, flags=re.DOTALL | re.IGNORECASE)
+                instruction = match.group(1) if match else marker.partition("Payload:")[2]
+                summary = task_summary(instruction)
+                if summary:
+                    return {"summary": summary, "summary_source": "instruction", "source_line": number}
+                continue  # Encrypted content stays encrypted; try an outward report.
+            summary = task_summary(outward_report(value))
+            if summary:
+                return {"summary": summary, "summary_source": "report", "source_line": number}
+    return {"summary": "", "summary_source": "bounded" if not started else "unavailable", "source_line": 0}
+
+
+def task_labels(codex_home: Path, thread_ids: list[str]) -> list[dict]:
+    if not isinstance(thread_ids, list) or not thread_ids or len(thread_ids) > TASK_LABEL_BATCH_SIZE or any(not isinstance(value, str) for value in thread_ids):
+        raise HarborError("每次最多读取 4 个任务简介")
+    for thread_id in thread_ids:
+        validate_thread_id(thread_id)
+    catalog = load_thread_catalog(codex_home)
+    results = []
+    for thread_id in dict.fromkeys(thread_ids):
+        thread, cached = catalog["by_id"].get(thread_id, {}), catalog["labels"].get(thread_id)
+        try:
+            path = indexed_rollout_path(codex_home, thread_id, thread.get("rollout_path") or (cached or {}).get("source_path"))
+            metadata = first_metadata(path)
+            signature = task_label_signature(path)
+            title = thread.get("title") or ""
+            if title.strip().lower() in {"hello", "hi", "你好"}:
+                title = ""
+            title = clean_index_text(clean_recall_text(title), 72) or agent_task_title(metadata.get("agent_path"))
+            if cached and cached["version"] == TASK_LABEL_VERSION and cached["signature"] == signature and cached["source_path"] == str(path):
+                results.append({**cached, "id": thread_id, "title": title or cached["title"], "task_label_ready": True})
+                continue
+            summary = {"summary": "", "summary_source": "unavailable", "source_line": 0}
+            database = state_database(codex_home)
+            if database and not metadata.get("parent_thread_id"):
+                with read_only_database(database) as connection:
+                    columns = {row[1] for row in connection.execute("PRAGMA table_info(threads)")}
+                    row = connection.execute("SELECT preview FROM threads WHERE id=?", (thread_id,)).fetchone() if "preview" in columns else None
+                    if row and row[0] and str(row[0]).strip().lower() not in {"hello", "hi", "你好"}:
+                        summary = {"summary": task_summary(row[0]), "summary_source": "codex", "source_line": 0}
+            if not summary["summary"]:
+                summary = bounded_task_summary(path, metadata)
+            label = {"thread_id": thread_id, "source_path": str(path), "signature": signature,
+                     "version": TASK_LABEL_VERSION, "title": title, **summary}
+            with managed_catalog(codex_home) as connection:
+                connection.execute("INSERT OR REPLACE INTO harbor_task_labels VALUES (?,?,?,?,?,?,?,?)", tuple(label[key] for key in ("thread_id", "source_path", "signature", "version", "title", "summary", "summary_source", "source_line")))
+            results.append({**label, "id": thread_id, "task_label_ready": True})
+        except (HarborError, OSError, ValueError, sqlite3.Error):
+            # The local display cache remains useful with an unplugged drive.
+            results.append({**(cached or {}), "id": thread_id, "title": (cached or {}).get("title") or thread.get("title") or "", "summary": (cached or {}).get("summary", ""), "task_label_ready": True})
+    return results
 
 
 def indexed_rollout_path(codex_home: Path, thread_id: str, rollout_value: str | None) -> Path:
@@ -1140,10 +1290,8 @@ def indexed_rollout_path(codex_home: Path, thread_id: str, rollout_value: str | 
 
 
 def thread_detail(codex_home: Path, thread_id: str) -> dict:
-    """Read one requested Codex index preview; never scan the rollout body."""
-    allowed = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
-    if not thread_id or len(thread_id) > 128 or any(char not in allowed for char in thread_id):
-        raise HarborError("任务 ID 无效")
+    """Read an index preview and the same bounded display label used by the list."""
+    validate_thread_id(thread_id)
     database = state_database(codex_home)
     if not database:
         raise HarborError("Codex 任务索引当前不可用")
@@ -1167,9 +1315,11 @@ def thread_detail(codex_home: Path, thread_id: str) -> dict:
     preview = clean_index_text(row["preview"], 520)
     if metadata.get("parent_thread_id") and preview.strip().lower() in {"hello", "hi", "你好"}:
         preview = ""
+    label = task_labels(codex_home, [thread_id])[0]
     return {
-        "id": str(row["id"]), "title": indexed_title or "未命名任务",
-        "preview": preview, "cwd": str(row["cwd"] or ""),
+        "id": str(row["id"]), "title": label.get("title") or indexed_title or "未命名任务",
+        "preview": label.get("summary") or clean_recall_text(preview), "summary_source": label.get("summary_source", ""),
+        "source_line": label.get("source_line", 0), "cwd": str(row["cwd"] or ""),
         "rollout_path": str(rollout_path), "created_at_ms": int(created or 0),
         "updated_at_ms": int(updated or 0), "agent_nickname": str(row["agent_nickname"] or metadata.get("agent_nickname") or "").strip(),
         "parent_id": str(metadata.get("parent_thread_id") or ""),
@@ -1202,9 +1352,9 @@ def task_record(codex_home: Path, thread_id: str, maximum_messages: int = 80) ->
                     if recipient == agent_path and "Message Type: NEW_TASK" in marker:
                         started = True
                     continue
-                if not started or value.get("type") != "event_msg" or payload.get("type") != "agent_message":
+                if not started:
                     continue
-                message = str(payload.get("message") or "").strip()
+                message = clean_recall_text(outward_report(value)).strip()
                 if message:
                     messages.append({"timestamp": value.get("timestamp"), "message": message[:12000]})
     except OSError as exc:
@@ -1266,11 +1416,14 @@ def session_record(path: Path, min_age: float, priority=None, protected_sessions
         meta = {"id": None, "parent_thread_id": None, "cwd": None, "timestamp": None, "thread_source": None, "agent_nickname": None, "agent_path": None}
         _, error = user_error(exc)
     try:
-        logical = path.stat().st_size
+        info = path.stat()
+        logical = info.st_size
+        label_signature = f"{info.st_size}:{info.st_mtime_ns}:{info.st_ctime_ns}"
         modified = path.stat().st_mtime if not linked else (backup.stat().st_mtime if backup.is_file() else path.lstat().st_mtime)
         completed = last_turn_complete(path) if target_exists or not linked else False
     except OSError as exc:
         logical, modified, completed = 0, path.lstat().st_mtime, False
+        label_signature = ""
         _, message = user_error(exc)
         error = error or message
     age = max(0.0, (time.time() - modified) / 86400)
@@ -1294,6 +1447,7 @@ def session_record(path: Path, min_age: float, priority=None, protected_sessions
         reasons.append("protected_session")
     return {
         "path": str(path), "name": path.name, "id": meta.get("id"), "parent_id": meta.get("parent_thread_id"),
+        "label_signature": label_signature,
         "thread_source": meta.get("thread_source"), "agent_nickname": meta.get("agent_nickname"), "agent_path": meta.get("agent_path"),
         "cwd": meta.get("cwd") or "", "timestamp": meta.get("timestamp"), "kind": kind, "logical": logical, "logical_h": human_bytes(logical),
         "local_allocated": local_allocated(path), "local_allocated_h": human_bytes(local_allocated(path)),
@@ -1900,6 +2054,8 @@ class HarborHandler(BaseHTTPRequestHandler):
                 return self.send_json(200, {"ok": True, "settings": saved})
             if self.path == "/api/task-detail":
                 return self.send_json(200, {"ok": True, "task": thread_detail(self.app["codex_home"], str(data.get("id") or ""))})
+            if self.path == "/api/task-labels":
+                return self.send_json(200, {"ok": True, "labels": task_labels(self.app["codex_home"], data.get("ids"))})
             if self.path == "/api/project-plan":
                 result = project_storage_plan(self.app["codex_home"], str(data.get("project_id") or ""))
                 volume = mounted_volume(resolve_storage_target(data))

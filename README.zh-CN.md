@@ -1,6 +1,6 @@
 # Memory Harbor · 记忆港
 
-<p align="center"><img src="skills/codex-memory-harbor/assets/dashboard/memory-harbor-logo-v4.png" width="88" alt="Memory Harbor"></p>
+<p align="center"><img src="skills/codex-memory-harbor/assets/dashboard/brand-mark.svg" width="88" alt="Memory Harbor"></p>
 <p align="center"><strong>空间轻一点，历史留得住。</strong></p>
 <p align="center"><a href="README.md">English</a> · 简体中文<br>macOS 13+ · Python 3.9+ · MIT · 0.4.6 beta</p>
 

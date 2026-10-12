@@ -2,6 +2,7 @@
 let token='',data=null,config={},filter='eligible',sortBy='size',busy=false,activeTask=null;
 let searchResults=null,searchGeneration=0,searchTimer=0,toastTimer=0,groupOrder=[];
 const selected=new Set(),selectedFiles=new Set(),selectedParkedFiles=new Set(),expanded=new Set(),plans=new Map(),pages=new Map(),scanning=new Set();
+const taskLabels=new Map(),labelQueue=new Set(),labelPending=new Set();let labelObserver=null,labelsRunning=false;
 const $=selector=>document.querySelector(selector);
 const esc=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 const fmt=bytes=>{let value=Number(bytes)||0,index=0,units=['B','KB','MB','GB','TB'];while(value>=1024&&index<4){value/=1024;index++}return`${value.toFixed(index&&value<10?1:0)} ${units[index]}`};
@@ -37,7 +38,7 @@ function storage(){
 }
 async function refresh(resetOrder=true){
   if(busy)return;$('#refresh').disabled=true;
-  try{data=await read('/api/scan?'+new URLSearchParams({min_age:30}));HarborWorkbench.pruneSelection(data.sessions,selected);if(resetOrder)groupOrder=[];storage();if(!expanded.size){const first=groups()[0];if(first)expanded.add(first.key)}render()}finally{$('#refresh').disabled=false}
+  try{data=await read('/api/scan?'+new URLSearchParams({min_age:30}));taskLabels.clear();labelQueue.clear();HarborWorkbench.pruneSelection(data.sessions,selected);if(resetOrder)groupOrder=[];storage();if(!expanded.size){const first=groups()[0];if(first)expanded.add(first.key)}render()}finally{$('#refresh').disabled=false}
 }
 async function syncVolumes(){try{if(!data)return;const result=await read('/api/volumes');data.volumes=result.volumes||[];storage();render();if(!busy){const repaired=await post('/api/repair-links',{});if(repaired.repaired?.length)await refresh(false)}}catch{toast(t('unavailable'))}}
 window.harborVolumeChanged=syncVolumes;
@@ -61,8 +62,32 @@ function groups(){
 }
 function taskState(row){return row.catalog_only?(row.target_exists?'docked':'indexOnly'):row.protected_session||row.protected_project?'protected':row.linked?(row.target_exists?'docked':'offline'):row.kind==='main'?'main':!row.last_turn_complete?'active':row.eligible?'candidate':'recent'}
 function taskRow(row){
-  const selectable=!row.catalog_only&&(filter==='linked'?row.linked:row.eligible),state=taskState(row);
-  return`<div class="task-row"><input type="checkbox" data-task="${esc(row.path)}" aria-label="${esc(row.title||row.id||t('child'))}" ${selected.has(row.path)?'checked':''} ${selectable&&!busy?'':'disabled'}><button class="task-name" data-task-detail="${esc(row.id||'')}"><b>${esc(row.title||t(row.kind==='main'?'main':'child')+' · '+(row.id||'').slice(0,8))}</b><span>${esc(row.match_excerpt||row.name||row.path)}</span></button><span class="task-size">${fmt(row.logical)}</span><span class="task-age">${row.age_days==null?'':esc(t('modified',{days:row.age_days}))}</span><span class="task-state">${esc(t(state))}</span><button class="pin ${row.protected_session?'on':''}" data-pin-task="${esc(row.id||'')}" aria-label="${esc(t(row.protected_session?'unpinTask':'pinTask'))}" ${row.id&&!busy?'':'disabled'}>${row.protected_session?'★':'☆'}</button></div>`;
+  const selectable=!row.catalog_only&&(filter==='linked'?row.linked:row.eligible),state=taskState(row),info=HarborWorkbench.taskPresentation(row,taskLabels.get(row.id),t);
+  return`<div class="task-row"><input type="checkbox" data-task="${esc(row.path)}" aria-label="${esc(info.title)}" ${selected.has(row.path)?'checked':''} ${selectable&&!busy?'':'disabled'}><button class="task-name" data-task-detail="${esc(row.id||'')}" title="${esc(info.title+' — '+info.summary)}"><b>${esc(info.title)}</b><span>${esc(info.summary)}</span></button><span class="task-size">${fmt(row.logical)}</span><span class="task-age">${row.age_days==null?'':esc(t('modified',{days:row.age_days}))}</span><span class="task-state">${esc(t(state))}</span><button class="pin ${row.protected_session?'on':''}" data-pin-task="${esc(row.id||'')}" aria-label="${esc(t(row.protected_session?'unpinTask':'pinTask'))}" ${row.id&&!busy?'':'disabled'}>${row.protected_session?'★':'☆'}</button></div>`;
+}
+function observeTaskLabels(){
+  labelObserver?.disconnect();
+  // Only rows entering the viewport are queued; never a whole-archive background scan.
+  const rows=new Map(items().map(row=>[row.id,row]));
+  const enqueue=button=>{const id=button.dataset.taskDetail,row=rows.get(id);if(id&&row&&!row.task_label_ready&&!taskLabels.has(id)&&!labelPending.has(id)){labelQueue.add(id);loadTaskLabels()}};
+  if(typeof IntersectionObserver==='undefined')return; // Details remain an on-demand fallback.
+  labelObserver=new IntersectionObserver(entries=>{for(const entry of entries)if(entry.isIntersecting){labelObserver.unobserve(entry.target);enqueue(entry.target)}},{rootMargin:'120px'});
+  document.querySelectorAll('[data-task-detail]').forEach(button=>labelObserver.observe(button));
+}
+async function loadTaskLabels(){
+  if(labelsRunning||busy||!labelQueue.size)return;labelsRunning=true;
+  const ids=[...labelQueue].slice(0,4);ids.forEach(id=>{labelQueue.delete(id);labelPending.add(id)});
+  try{
+    const result=await post('/api/task-labels',{ids});
+    for(const label of result.labels){const row=items().find(row=>row.id===label.id);if(row&&(!row.label_signature||!label.signature||row.label_signature===label.signature))taskLabels.set(label.id,label)}
+  }catch{for(const id of ids)taskLabels.set(id,{task_label_ready:true})}
+  finally{
+    labelsRunning=false;ids.forEach(id=>labelPending.delete(id));
+    // Update text in place: no rerender, reordering, focus loss or selection change.
+    const rows=new Map(items().map(row=>[row.id,row]));
+    for(const button of document.querySelectorAll('[data-task-detail]')){const id=button.dataset.taskDetail,row=rows.get(id);if(!row||!ids.includes(id))continue;const info=HarborWorkbench.taskPresentation(row,taskLabels.get(id),t);button.querySelector('b').textContent=info.title;button.querySelector('span').textContent=info.summary;button.title=info.title+' — '+info.summary;button.parentElement.querySelector('input').setAttribute('aria-label',info.title)}
+    if(labelQueue.size)loadTaskLabels();
+  }
 }
 function mediaView(group){
   if(group.standalone||searchResults)return'';
@@ -85,7 +110,7 @@ function render(){
   }).join(''):`<p class="empty">${esc(t(searchResults?'noResults':'empty'))}</p>`;
   $('#searchStatus').hidden=searchResults===null;if(searchResults)$('#searchStatus').textContent=t('searchCount',{count:searchResults.length});
   document.querySelectorAll('[data-partial="true"]').forEach(element=>element.indeterminate=true);
-  bindTree();updateSelection();
+  bindTree();updateSelection();observeTaskLabels();
 }
 function bindTree(){
   document.querySelectorAll('[data-expand]').forEach(button=>button.onclick=()=>{const key=button.dataset.expand;expanded.has(key)?expanded.delete(key):expanded.add(key);render()});
@@ -154,6 +179,7 @@ async function executeMigration(plan,keepLocal){
 async function showTask(id){
   if(!id||busy)return;
   try{const response=await post('/api/task-detail',{id});activeTask=response.task;const task=activeTask;$('#taskDetailTitle').textContent=task.title||t('unnamedTask');$('#taskDetailPreview').textContent=task.preview||t('taskNoPreview');$('#taskDetailMeta').innerHTML=[['updated',task.updated_at_ms?new Intl.DateTimeFormat(language,{dateStyle:'medium',timeStyle:'short'}).format(new Date(task.updated_at_ms)):t('unknown')],['cwd',task.cwd||t('unknown')],['taskId',task.id],['agent',task.agent_nickname||'—']].map(([key,value])=>`<div><span>${esc(t(key))}</span><b>${esc(value)}</b></div>`).join('');$('#taskRecord').hidden=true;$('#taskRecordMessages').innerHTML='';$('#openParentInCodex').hidden=!task.is_subagent;$('#openInCodex').textContent=t(task.is_subagent?'readReports':'openCodex');$('#taskDetailHint').textContent=t(task.is_subagent?'childHint':'taskHint');$('#taskDialog').showModal()}catch(error){showError(error)}
+  if($('#taskDialog').open&&activeTask?.id===id){const key={instruction:'taskSourceInstruction',report:'taskSourceReport',codex:'taskSourceCodex'}[activeTask.summary_source];if(key)$('#taskDetailHint').textContent=t(key,{line:activeTask.source_line})+' '+$('#taskDetailHint').textContent;}
 }
 async function manage(action){
   if(busy)return;$('#manageDialog').close();busy=true;render();

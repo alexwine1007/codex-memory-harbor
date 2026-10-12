@@ -30,6 +30,48 @@ assert.deepEqual(m.selectedObjects(sessions,plans,selected,new Set(['f1','f2','u
  {kind:'history',path:'p0'},{kind:'file',path:'f1',plan_id:'A'},{kind:'file',path:'f2',plan_id:'B'}]);
 ''', ASSETS / 'workbench-model.js')
 
+    def test_task_labels_show_names_and_descriptions_not_filenames(self):
+        self.node(r'''
+const assert=require('node:assert/strict'),m=require(process.argv[1]),i=require(process.argv[2]);
+const t=key=>i.translate('zh-CN',key),row={id:'12345678',kind:'child',name:'rollout-private.jsonl',path:'/private/file'};
+assert.deepEqual(m.taskPresentation(row,null,t),{title:'未命名子任务',summary:'正在读取任务简介…'});
+const info=m.taskPresentation(row,{title:'头像构图核查',summary:'检查圆形裁切后的辨识度。',task_label_ready:true},t);
+assert.equal(info.title,'头像构图核查');assert.equal(info.summary,'检查圆形裁切后的辨识度。');
+assert.equal(m.taskPresentation({...row,task_label_ready:true},null,t).summary,'没有可用简介，点击查看任务详情');
+assert.equal(m.taskPresentation({...row,match_excerpt:'命中的证据'},info,t).summary,'命中的证据');
+assert.equal(m.taskPresentation({...row,kind:'main'},null,key=>i.translate('en',key)).title,'Untitled task');
+''', ASSETS / 'workbench-model.js', ASSETS / 'i18n.js')
+        source=(ASSETS/'app.js').read_text()
+        self.assertIn('IntersectionObserver',source)
+        self.assertIn("slice(0,4)",source)
+        self.assertIn("post('/api/task-labels'",source)
+        self.assertNotIn('row.match_excerpt||row.name||row.path',source)
+
+    def test_brand_has_no_white_matte_and_readmes_use_shared_vector(self):
+        import struct
+        import zlib
+        import xml.etree.ElementTree as ET
+        vector=ASSETS/'brand-mark.svg'
+        tree=ET.parse(vector);root=tree.getroot()
+        self.assertEqual(root.attrib['viewBox'],'0 0 256 256')
+        rectangles=root.findall('{http://www.w3.org/2000/svg}rect')
+        self.assertEqual(len(rectangles),1)
+        self.assertEqual(rectangles[0].attrib['rx'],'56')
+        self.assertNotIn('stroke',rectangles[0].attrib)
+        for readme in ('README.md','README.zh-CN.md'):
+            self.assertIn('assets/dashboard/brand-mark.svg',(ROOT/readme).read_text())
+        image=(ASSETS.parent/'memory-harbor-logo-v5-1024.png').read_bytes()
+        self.assertEqual(image[:8],b'\x89PNG\r\n\x1a\n')
+        width,height,depth,kind=struct.unpack('>IIBB',image[16:26])
+        self.assertEqual((width,height,depth,kind),(1024,1024,8,6))
+        compressed=b'';offset=8
+        while offset<len(image):
+            length=struct.unpack('>I',image[offset:offset+4])[0]
+            if image[offset+4:offset+8]==b'IDAT':compressed+=image[offset+8:offset+8+length]
+            offset+=12+length
+        # First pixel predictors are all zero: alpha byte proves a transparent corner.
+        self.assertEqual(zlib.decompress(compressed)[4],0)
+
     def test_dictionary_parity_interpolation_and_translated_progress(self):
         self.node(r'''
 const assert=require('node:assert/strict'),i=require(process.argv[1]),p=require(process.argv[2]);
@@ -95,7 +137,7 @@ assert.equal(p.state(job,n=>n+' B',(k,v)=>i.translate('en',k,v)).percent,100);
         self.assertNotIn('Timer.', native)
         build = (ROOT / 'scripts/build_macos_app.sh').read_text()
         self.assertIn('for language in en zh-Hans', build)
-        self.assertIn('0.4.6-beta.2', build)
+        self.assertIn('0.4.6-beta.3', build)
 
     def test_workbench_does_not_nest_a_card_inside_the_native_window(self):
         css = (ASSETS / 'styles.css').read_text()
