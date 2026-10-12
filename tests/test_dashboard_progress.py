@@ -35,5 +35,6 @@ assert.equal(state({total:0,completed:0,status:'complete',released_bytes:0},form
         self.assertIn('<progress id="progressFill"', html)
         self.assertLess(html.index('src="progress-model.js"'), html.index('src="app.js"'))
         self.assertNotIn('transition:width', css)
-        self.assertIn('查看处理详情', js)
+        self.assertIn('data-i18n="transferDetails"', html)
+        self.assertIn("HarborProgress.state(job,fmt,t)", js)
         self.assertNotIn('已验证并释放 ${fmt(job.bytes)}', js)

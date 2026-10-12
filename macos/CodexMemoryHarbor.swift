@@ -1,16 +1,35 @@
 import Cocoa
 
+private func L(_ key: String, _ values: CVarArg...) -> String {
+    String(format: NSLocalizedString(key, comment: ""), arguments: values)
+}
+
 final class CompactCardView: NSView {
-    private let statusLabel = CompactCardView.label("检查中", size: 13, color: NSColor(calibratedWhite: 0.67, alpha: 1))
+    private let statusLabel = CompactCardView.label(L("检查中"), size: 13, color: NSColor(calibratedWhite: 0.76, alpha: 1))
     private let eligibleLabel = CompactCardView.label("—", size: 52, weight: .bold)
-    private let headingLabel = CompactCardView.label("随时可以回来", size: 12, color: NSColor(calibratedWhite: 0.67, alpha: 1))
-    private let noteLabel = CompactCardView.label("正在看看记忆状态", size: 12, color: NSColor(calibratedWhite: 0.67, alpha: 1))
-    private let driveLabel = CompactCardView.label("正在读取本机状态", size: 12, color: NSColor(calibratedWhite: 0.67, alpha: 1))
+    private let headingLabel = CompactCardView.label(L("随时可以回来"), size: 12, color: NSColor(calibratedWhite: 0.76, alpha: 1))
+    private let noteLabel = CompactCardView.label(L("正在看看记忆状态"), size: 12, color: NSColor(calibratedWhite: 0.76, alpha: 1))
+    private let driveLabel = CompactCardView.label(L("正在读取本机状态"), size: 12, color: NSColor(calibratedWhite: 0.76, alpha: 1))
     private let driveDot = NSView()
+    private let material = NSVisualEffectView()
+    private var accessibilityObserver: NSObjectProtocol?
 
     init(target: AnyObject, action: Selector) {
         super.init(frame: NSRect(x: 0, y: 0, width: 360, height: 250))
         wantsLayer = true
+        layer?.cornerRadius = 28
+        layer?.masksToBounds = true
+        appearance = NSAppearance(named: .darkAqua)
+        material.frame = bounds
+        material.autoresizingMask = [.width, .height]
+        material.material = .hudWindow
+        material.blendingMode = .behindWindow
+        material.state = .active
+        addSubview(material)
+        updateMaterial()
+        accessibilityObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil, queue: .main
+        ) { [weak self] _ in self?.updateMaterial() }
         let logo = NSImageView(frame: NSRect(x: 21, y: 186, width: 40, height: 40))
         logo.image = NSApplication.shared.applicationIconImage
         logo.imageScaling = .scaleProportionallyUpOrDown
@@ -33,7 +52,7 @@ final class CompactCardView: NSView {
         addSubview(driveDot)
         driveLabel.frame = NSRect(x: 39, y: 24, width: 190, height: 23)
         addSubview(driveLabel)
-        let button = NSButton(title: "打开港口", target: target, action: action)
+        let button = NSButton(title: L("打开"), target: target, action: action)
         button.frame = NSRect(x: 247, y: 18, width: 92, height: 38)
         button.isBordered = false
         button.font = .systemFont(ofSize: 13, weight: .semibold)
@@ -46,27 +65,21 @@ final class CompactCardView: NSView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    override func draw(_ dirtyRect: NSRect) {
-        let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 28, yRadius: 28)
-        path.addClip()
-        let colors = [
-            NSColor(calibratedRed: 0.10, green: 0.09, blue: 0.19, alpha: 1).cgColor,
-            NSColor(calibratedRed: 0.055, green: 0.063, blue: 0.095, alpha: 1).cgColor,
-        ] as CFArray
-        if let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors, locations: [0, 1]) {
-            NSGraphicsContext.current?.cgContext.drawLinearGradient(
-                gradient,
-                start: CGPoint(x: bounds.maxX, y: bounds.maxY),
-                end: CGPoint(x: bounds.minX, y: bounds.minY),
-                options: []
-            )
-        }
-        NSColor(calibratedWhite: 1, alpha: 0.10).setStroke()
-        path.lineWidth = 1
-        path.stroke()
+    deinit { if let accessibilityObserver { NSWorkspace.shared.notificationCenter.removeObserver(accessibilityObserver) } }
+
+    private func updateMaterial() {
+        let reduce = NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
+        material.isHidden = reduce
+        layer?.backgroundColor = NSColor(calibratedRed: 0.10, green: 0.11, blue: 0.18, alpha: reduce ? 1 : 0.22).cgColor
+        layer?.borderWidth = 1
+        layer?.borderColor = NSColor(calibratedWhite: 1, alpha: 0.18).cgColor
     }
 
-    func showLoading() { statusLabel.stringValue = "正在更新记忆状态" }
+    override func draw(_ dirtyRect: NSRect) {
+        // System material owns compositing. No custom shader, timer or frame loop.
+    }
+
+    func showLoading() { statusLabel.stringValue = L("正在更新记忆状态") }
 
     func update(summary: [String: Any]) {
         let available = summary["volume_available"] as? Bool ?? false
@@ -75,28 +88,28 @@ final class CompactCardView: NSView {
         let eligible = summary["eligible_files"] as? Int ?? 0
         let eligibleSize = summary["eligible_h"] as? String ?? ""
         let continuityHealthy = accessible == docked && (docked > 0 || available)
-        headingLabel.stringValue = continuityHealthy ? "随时可以回来" : "重新连接后可回来"
+        headingLabel.stringValue = continuityHealthy ? L("随时可以回来") : L("重新连接后可回来")
         eligibleLabel.stringValue = "\(accessible) / \(docked)"
-        statusLabel.stringValue = continuityHealthy ? "记忆都在" : "有些记忆暂时离线"
-        noteLabel.stringValue = eligible > 0 ? "另有 \(eligible) 项（\(eligibleSize)）可以安全停泊" : "\(accessible) 段历史已安全停泊"
+        statusLabel.stringValue = continuityHealthy ? L("停泊历史可读") : L("有些记忆暂时离线")
+        noteLabel.stringValue = eligible > 0 ? L("另有 %d 项（%@）可停泊", eligible, eligibleSize) : L("%d 段历史已停泊", accessible)
         if available {
-            let name = summary["volume_name"] as? String ?? "外置盘"
+            let name = summary["volume_name"] as? String ?? L("外置盘")
             let free = summary["volume_free_h"] as? String ?? ""
-            driveLabel.stringValue = "\(name) · \(free) 可用"
+            driveLabel.stringValue = L("%@ · %@ 可用", name, free)
             driveDot.layer?.backgroundColor = NSColor.systemTeal.cgColor
         } else {
-            noteLabel.stringValue = docked > 0 ? "连接存储后可读取停泊历史" : "连接存储后可开始安全停泊"
-            driveLabel.stringValue = "外置存储尚未连接"
+            noteLabel.stringValue = docked > 0 ? L("连接存储后可读取停泊历史") : L("连接存储后可开始安全停泊")
+            driveLabel.stringValue = L("外置存储尚未连接")
             driveDot.layer?.backgroundColor = NSColor.systemOrange.cgColor
         }
     }
 
     func showFailure() {
-        statusLabel.stringValue = "暂时看不清状态"
-        headingLabel.stringValue = "记忆状态"
+        statusLabel.stringValue = L("暂时看不清状态")
+        headingLabel.stringValue = L("记忆状态")
         eligibleLabel.stringValue = "—"
-        noteLabel.stringValue = "没有移动或释放任何历史"
-        driveLabel.stringValue = "打开详情后可重新扫描"
+        noteLabel.stringValue = L("没有移动或释放任何历史")
+        driveLabel.stringValue = L("打开详情后可重新扫描")
         driveDot.layer?.backgroundColor = NSColor.systemOrange.cgColor
     }
 
@@ -259,14 +272,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             window.orderOut(nil)
         } catch {
             dashboardProcess = nil
-            showError("无法打开详情页：\(error.localizedDescription)")
+            showError(L("无法打开详情页：%@", error.localizedDescription))
         }
     }
 
     private func buildMenu() {
         let menu = NSMenu(); let appItem = NSMenuItem(); menu.addItem(appItem)
-        let submenu = NSMenu(); submenu.addItem(withTitle: "关于 Memory Harbor", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
-        submenu.addItem(NSMenuItem.separator()); submenu.addItem(withTitle: "退出", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        let submenu = NSMenu(); submenu.addItem(withTitle: L("关于 Memory Harbor"), action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        submenu.addItem(NSMenuItem.separator()); submenu.addItem(withTitle: L("退出"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appItem.submenu = submenu; NSApp.mainMenu = menu
     }
 

@@ -1,7 +1,7 @@
 [project]
 name = "memory-harbor"
-version = "0.4.5b2"
-description = "安全停泊并可追溯召回 Codex 子任务历史证据"
+version = "0.4.6b1"
+description = "Reclaim Mac storage without losing AI work history: verified external-drive docking, original paths, local recall."
 readme = "README.md"
 requires-python = ">=3.9"
 license = {text = "MIT"}

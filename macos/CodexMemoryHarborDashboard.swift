@@ -1,6 +1,10 @@
 import Cocoa
 import WebKit
 
+private func L(_ key: String, _ values: CVarArg...) -> String {
+    String(format: NSLocalizedString(key, comment: ""), arguments: values)
+}
+
 final class DashboardDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
     private var window: NSWindow!
     private var webView: WKWebView!
@@ -36,7 +40,7 @@ final class DashboardDelegate: NSObject, NSApplicationDelegate, WKNavigationDele
         progress.startAnimation(nil)
         progress.autoresizingMask = [.minXMargin, .maxXMargin, .minYMargin, .maxYMargin]
         container.addSubview(progress)
-        let loading = NSTextField(labelWithString: "正在打开 Memory Harbor…")
+        let loading = NSTextField(labelWithString: L("正在打开 Memory Harbor…"))
         loading.textColor = NSColor(calibratedWhite: 0.72, alpha: 1)
         loading.alignment = .center
         loading.frame = NSRect(x: frame.width / 2 - 150, y: frame.height / 2 - 30, width: 300, height: 22)
@@ -66,7 +70,7 @@ final class DashboardDelegate: NSObject, NSApplicationDelegate, WKNavigationDele
     private func startServer() {
         let path = scriptPath()
         guard FileManager.default.isReadableFile(atPath: path) else {
-            failStartup("未找到已安装的 Memory Harbor Skill。")
+            failStartup(L("未找到已安装的 Memory Harbor Skill。"))
             return
         }
         let process = Process()
@@ -83,8 +87,8 @@ final class DashboardDelegate: NSObject, NSApplicationDelegate, WKNavigationDele
                 self.server = nil
                 if !self.isTerminating {
                     let message = self.startupSucceeded
-                        ? "本地仪表盘服务已停止，请重新打开详情页。"
-                        : "本地仪表盘服务提前退出（状态 \(finished.terminationStatus)）。"
+                        ? L("本地仪表盘服务已停止，请重新打开详情页。")
+                        : L("本地仪表盘服务提前退出（状态 %d）。", finished.terminationStatus)
                     self.failStartup(message)
                 }
             }
@@ -94,7 +98,7 @@ final class DashboardDelegate: NSObject, NSApplicationDelegate, WKNavigationDele
             readServerAddress(from: output, process: process)
         } catch {
             server = nil
-            failStartup("无法启动本地仪表盘：\(error.localizedDescription)")
+            failStartup(L("无法启动本地仪表盘：%@", error.localizedDescription))
         }
     }
 
@@ -113,7 +117,7 @@ final class DashboardDelegate: NSObject, NSApplicationDelegate, WKNavigationDele
                 let value = payload["url"] as? String,
                 let url = URL(string: value)
             else {
-                DispatchQueue.main.async { self?.failStartup("本地仪表盘没有返回有效的启动地址。") }
+                DispatchQueue.main.async { self?.failStartup(L("本地仪表盘没有返回有效的启动地址。")) }
                 return
             }
             DispatchQueue.main.async {
@@ -124,7 +128,7 @@ final class DashboardDelegate: NSObject, NSApplicationDelegate, WKNavigationDele
     }
 
     private func loadWhenReady(url: URL, attempt: Int) {
-        guard attempt < 35 else { failStartup("本地仪表盘服务启动超时。"); return }
+        guard attempt < 35 else { failStartup(L("本地仪表盘服务启动超时。")); return }
         URLSession.shared.dataTask(with: url) { [weak self] _, response, _ in
             DispatchQueue.main.async {
                 if response != nil {
@@ -177,12 +181,12 @@ final class DashboardDelegate: NSObject, NSApplicationDelegate, WKNavigationDele
     }
 
     private func openCodex(_ url: URL) {
-        guard let applicationURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.openai.codex") else { showError("未找到 Codex 桌面应用。"); return }
+        guard let applicationURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.openai.codex") else { showError(L("未找到 Codex 桌面应用。")); return }
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.activates = true
         NSWorkspace.shared.open([url], withApplicationAt: applicationURL, configuration: configuration) { [weak self] _, error in
             guard let error else { return }
-            DispatchQueue.main.async { self?.showError("无法打开 Codex 任务：\(error.localizedDescription)") }
+            DispatchQueue.main.async { self?.showError(L("无法打开 Codex 任务：%@", error.localizedDescription)) }
         }
     }
 

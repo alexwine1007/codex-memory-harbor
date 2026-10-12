@@ -1,0 +1,20 @@
+name: Safety and UI contracts
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4, verified upstream
+      - name: Python safety and JavaScript model tests
+        run: python3 -m unittest discover -s tests -q
+      - name: JavaScript syntax
+        run: |
+          for file in skills/codex-memory-harbor/assets/dashboard/*.js; do node --check "$file"; done
+      - name: Native source typecheck
+        run: |
+          xcrun swiftc -typecheck macos/CodexMemoryHarbor.swift -framework Cocoa
+          xcrun swiftc -typecheck macos/CodexMemoryHarborDashboard.swift -framework Cocoa -framework WebKit
+      - name: Shell syntax
+        run: zsh -n scripts/build_macos_app.sh scripts/install_macos.sh

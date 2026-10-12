@@ -80,16 +80,15 @@ class HarborTests(unittest.TestCase):
         dashboard = REPO_ROOT / "skills/codex-memory-harbor/assets/dashboard"
         html = (dashboard / "index.html").read_text(encoding="utf-8")
         javascript = (dashboard / "app.js").read_text(encoding="utf-8")
-        self.assertIn("新增可停泊的任务历史", html)
-        self.assertIn("查看候选历史", html)
-        self.assertIn("查看项目大素材", html)
-        self.assertIn("这里不含已停泊历史，也不含项目视频、图片等大素材", javascript)
-        self.assertIn("setContentMode('files')", javascript)
+        self.assertIn('class="workbench"', html)
+        self.assertNotIn('class="hero"', html)
+        self.assertIn("mediaView(group)", javascript)
+        self.assertIn("mediaSummary", javascript)
         self.assertNotIn("projectFileDialog", javascript)
         self.assertIn("/api/parking-start", javascript)
         self.assertIn("/api/parking-job?", javascript)
-        self.assertIn("fmt(history.docked_bytes)", javascript)
-        self.assertIn("fmt(files.total_bytes)", javascript)
+        self.assertIn("fmt(plan.history.docked_bytes)", javascript)
+        self.assertIn("fmt(plan.files.total_bytes)", javascript)
 
     def test_chinese_scifi_prototype_is_fixture_only_and_interactive(self):
         prototype = REPO_ROOT / "docs/design/prototype"
@@ -129,8 +128,8 @@ class HarborTests(unittest.TestCase):
         metadata = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
         readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
         self.assertIn('name = "memory-harbor"', metadata)
-        self.assertIn('version = "0.4.5b2"', metadata)
-        self.assertEqual(harbor.VERSION, "0.4.5-beta.2")
+        self.assertIn('version = "0.4.6b1"', metadata)
+        self.assertEqual(harbor.VERSION, "0.4.6-beta.1")
         self.assertEqual(readme.splitlines()[0], "# Memory Harbor")
         self.assertIn("canonical checkout directory is `memory-harbor`", readme)
         self.assertIn("`codex-memory-harbor` compatibility symlink", readme)
@@ -169,9 +168,9 @@ class HarborTests(unittest.TestCase):
         self.assertIn('MemoryHarbor.icns" "$HELPER/Contents/Resources', build)
         self.assertIn('$SKILL_DEST/scripts/harbor.py serve', install)
         self.assertIn('NSRemovableVolumesUsageDescription string Memory Harbor 需要访问你选择的存储设备', build)
-        self.assertIn('CompactCardView.label("随时可以回来"', owner)
-        self.assertIn('statusLabel.stringValue = continuityHealthy ? "记忆都在"', owner)
-        self.assertIn('NSButton(title: "打开港口"', owner)
+        self.assertIn('CompactCardView.label(L("随时可以回来")', owner)
+        self.assertIn('statusLabel.stringValue = continuityHealthy ? L("停泊历史可读")', owner)
+        self.assertIn('NSButton(title: L("打开")', owner)
 
     def test_dashboard_server_can_bind_an_ephemeral_port(self):
         with tempfile.TemporaryDirectory() as d:

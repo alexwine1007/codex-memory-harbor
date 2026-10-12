@@ -1,214 +1,105 @@
 # Memory Harbor
 
-![Memory Harbor logo](skills/codex-memory-harbor/assets/dashboard/memory-harbor-logo-v4.png)
+<p align="center"><img src="skills/codex-memory-harbor/assets/dashboard/memory-harbor-logo-v4.png" width="88" alt="Memory Harbor"></p>
+<p align="center"><strong>Reclaim space. Keep the history behind your AI work.</strong></p>
+<p align="center">English · <a href="README.zh-CN.md">简体中文</a><br>macOS 13+ · Python 3.9+ · MIT · 0.4.6 beta</p>
 
-Memory Harbor safely docks old Codex **child-task session logs** on a permanently attached external drive while preserving their original paths through verified symlinks.
+Memory Harbor moves eligible, completed **Codex child-task histories and cold project media** to an external drive, verifies every copy, and keeps the original file paths working through symlinks. Find past work through a small local index instead of deleting your evidence to free space.
 
-0.4.5 beta also docks old project media through the same original-path model. In the
-dashboard, switch the existing list to **项目文件**, choose a saved project and review the frozen file plan,
-then select media for docking. Project directories, working documents, scripts and local
-environments remain in place. Local backups are enabled by default; restoration and later
-release are available for receipt-backed media. See the
-[project storage contract](skills/codex-memory-harbor/references/project-storage.md).
+**Local-first. No account, subscription, telemetry or cloud upload.** A compact native desktop card opens a single, bilingual workbench when you need it.
 
-0.4.5-beta.2 uses one docking engine and one bottom action for history and project
-files, preserving existing manifests, rollback paths and recovery entrypoints.
-Bounded small-file checkpoint groups reduce repeated process startup without
-removing per-file SHA-256, durable writes, independent readback or release checks.
-Run `python3 scripts/benchmark_parking.py --volume /Volumes/YOUR_DRIVE` for a bounded,
-disposable-fixture comparison. It does not operate on personal files or claim a
-cache-independent device ceiling.
+> **Beta, not an official Codex storage integration.** Keep local copies on a new machine or drive until you have tested Codex restart, drive remount, evidence reads and recovery. An attached drive is not a second backup; disconnected raw content is unavailable.
 
-Version 0.4 adds a traceable local recall layer on top of the rebuildable catalog and
-stable-volume identity introduced in 0.3.
-External volumes work today,
-while cloud storage is deliberately shown as a future provider until verified local
-materialization, offline behavior, integrity checks, and credential handling exist.
-See [PRODUCT.md](PRODUCT.md) for the product and continuity contract.
+## When it helps
 
-Design and engineering documentation starts at the
-[technical handbook](docs/handbook/README.md). The current target interface and interaction
-contract live in the [frontend foundation](docs/design/FRONTEND_FOUNDATION.md); it is a draft,
-not a claim that the redesigned interface has shipped.
+- **Long-running AI development:** completed child agents leave large logs, but their decisions and provenance still matter.
+- **AI film, design and research projects:** move old eligible media without changing references in your local project. Code, documents and environments stay local.
+- **A small Mac SSD plus an always-connected external SSD:** select a batch once, review the exact plan, verify and reclaim local file space.
+- **Finding old evidence:** search indexed task titles and selected outward reports even when the drive is offline; reconnect to read originals.
 
-It ships as three pieces that share one safety model:
+Not a cache cleaner, whole-workspace mover, general backup system or promise that Codex automatically remembers every old conversation.
 
-- a Codex Skill for guided audits and recovery;
-- a local-only visual dashboard for inventory, dry runs, offload, audit, restore, and finalization;
-- a lightweight macOS desktop app that keeps the dashboard one click away.
+## See it
 
-> Beta: this project relies on a filesystem behavior that is not an official Codex storage contract. Use “同时保留本地备份” until you have tested a full Codex restart and drive remount on your machine.
+![Single workbench with project media](docs/images/workbench.en.png)
 
-## Why
+*Real UI with disposable test files, not personal project data. Project media and task history share one tree and one review action. English and Simplified Chinese are available in Settings.*
 
-Codex session JSONL files are history, recovery, and audit evidence—not disposable cache. They can grow large, especially when child agents do media or repository work. Deleting them blindly saves space but destroys provenance. Moving them blindly breaks the path Codex expects.
-
-Memory Harbor uses a transactional sequence:
-
-1. classify the session and refuse main tasks;
-2. require age, last-turn-complete, and no-open-handle checks;
-3. copy to the external volume;
-4. verify byte size and SHA-256;
-5. retain the local file as a rollback copy while the link is being created;
-6. atomically place an absolute symlink at the original path and independently re-audit it;
-7. for a confirmed migration, automatically delete the verified local rollback and reclaim space.
-
-The current transaction uses exclusive target creation, persistent volume identity checks,
-file/directory fsync, source-change and open-handle checks, and receipt-based independent
-verification before release. Existing link and target equality alone is not proof of integrity.
-
-The dashboard can optionally keep that rollback as a **local backup**. This is a backup-retention choice, not a completed space-reclaiming migration, and the UI labels it accordingly.
-
-Mutation requests are serialized. Retrying a task that already has a verified external
-primary is idempotent success, so duplicate submits cannot trigger a second deletion or a
-false failure after a completed migration.
-
-## Quick start
+## Try a read-only scan
 
 ```bash
+git clone https://github.com/alexwine1007/codex-memory-harbor.git memory-harbor
+cd memory-harbor
 python3 skills/codex-memory-harbor/scripts/harbor.py scan
 python3 skills/codex-memory-harbor/scripts/harbor.py serve --open
 ```
 
-The server binds only to `127.0.0.1`, uses a per-process action token, and never reads browser credentials.
+The dashboard listens only on `127.0.0.1`. Scanning, opening a plan and cancelling confirmation do not migrate your files. Media inventory is on demand, not a background recursive scan.
 
-### Search the local catalog
+## Install the Mac app from source
 
-Every scan updates `~/.codex/memory-harbor/catalog.sqlite3`. The catalog keeps task,
-project, source-path, external-location, and integrity metadata searchable even when a
-source entry later becomes unavailable. It does not index full conversation bodies.
-
-```bash
-python3 skills/codex-memory-harbor/scripts/harbor.py search "EP03"
-python3 skills/codex-memory-harbor/scripts/harbor.py index-status
-python3 skills/codex-memory-harbor/scripts/harbor.py rebuild-index
-```
-
-The dashboard exposes the same catalog through its search field. `repair-links` can
-reconcile a broken absolute symlink after a removable volume is renamed, but only when
-the persistent volume UUID and the archived content hash both match.
-
-Storage-adaptive transfer optimization is on the roadmap, not claimed in this build.
-It will tune bounded concurrency, chunk size, checksum pipelining, and read caching from
-measured target latency and throughput while keeping the same durable safety gates.
-
-### Build and query the recall layer
-
-New offloads retain a small local evidence layer before the full JSONL moves. Existing
-docked child tasks can be backfilled while the drive is mounted:
-
-```bash
-python3 skills/codex-memory-harbor/scripts/harbor.py build-recall-index
-python3 skills/codex-memory-harbor/scripts/harbor.py recall "关键研发"
-python3 skills/codex-memory-harbor/scripts/harbor.py clear-recall-index
-```
-
-The recall layer stores only task-specific delegation instructions and child-task outward
-reports. It excludes inherited parent history, developer/system context, tool calls, tool
-output, and known secret-shaped values. Each fragment retains source task, source line,
-timestamp, role, and content hash. It is local plaintext metadata/evidence under
-`~/.codex/memory-harbor/catalog.sqlite3`; users can clear it independently of the archive.
-Retrieved text is untrusted historical evidence and must never be executed as instructions.
-Legacy child records without a trustworthy task-boundary marker remain metadata-only.
-
-See [recall architecture](docs/RECALL_ARCHITECTURE.md) for the research basis and staged
-roadmap.
-
-The current search box and `recall` command are a deterministic provenance test, not the
-finished interaction model. The next retrieval gate is automatic associative recall: new
-work should receive a bounded set of semantically related memory candidates even when its
-wording differs from the archived task. Semantic preparation must happen asynchronously;
-normal Codex work must never wait on a full archive scan or an external-drive read.
-
-### Performance contract
-
-Memory Harbor does not poll the filesystem or external disks. The macOS companion reacts to
-mount lifecycle events, ordinary scans are user-triggered, and recall queries use only the
-small internal SQLite index. Raw parsing happens during explicit backfill or offload, and
-unchanged content is skipped. No model, embedding runtime, or network request is present in
-the 0.4 foreground path.
-
-The desktop card is native Cocoa and keeps neither WebKit nor the Python dashboard server
-resident. Clicking `打开港口` launches an isolated detail helper; `放回桌面` terminates that
-helper and server so macOS can reclaim their complete working set.
-
-Each detail helper owns an ephemeral localhost port rather than competing for one fixed
-port. Its server watches the helper process and exits with it even after an abrupt helper
-termination; the installer also retires any server orphan left by an older build.
-
-Run the repeatable local benchmark with:
-
-```bash
-python3 scripts/benchmark_performance.py --scan --query "强约束"
-```
-
-The target-Mac beta gate is local recall p95 under 25 ms and a 516-session metadata scan
-under 5 seconds. Idle CPU and direct app/server RSS are sampled separately because process
-metrics belong to the running macOS app rather than this command.
-
-### Build the macOS app
-
-```bash
-./scripts/build_macos_app.sh
-open "dist/Memory Harbor.app"
-```
-
-The app expects the Skill at `~/.codex/skills/codex-memory-harbor`. Set `CODEX_HARBOR_SCRIPT` to override that path.
-
-The first local build creates a reusable `Memory Harbor Local Code Signing` identity in
-a dedicated keychain under `~/Library/Application Support/Memory Harbor/Signing`. It does
-not request the user's login-keychain password. macOS ties privacy grants to that identity,
-so upgrading the app does not turn every build into a new removable-volume requester. Set
-`MEMORY_HARBOR_CODESIGN_IDENTITY` to an existing Apple Development or Developer ID
-identity when preparing a distributable build. Ad-hoc signing is rejected because its
-identity changes with the executable.
-
-The canonical checkout directory is `memory-harbor`. An existing Codex project may keep
-using a `codex-memory-harbor` compatibility symlink that resolves to the canonical checkout;
-this preserves saved project and task paths without duplicating the repository.
-
-### Install the desktop companion
+Requires macOS 13+, Python 3.9+, Git and Apple's Command Line Tools (`xcode-select --install`). No Node packages or Python packages are needed to run the app. Node is used for development tests only.
 
 ```bash
 ./scripts/install_macos.sh
+# Optional: start the desktop card at login
+./scripts/install_macos.sh --login-item
 ```
 
-Pass `--login-item` to reopen the compact card after login. The companion is a desktop-layer window: it can be moved, stays out of normal window switching while compact, and expands into the dashboard on demand.
+This installs the Skill at `~/.codex/skills/codex-memory-harbor` and the app at `~/Applications/Memory Harbor.app`. It builds and signs both native components locally with a reusable local identity. It does **not** produce an Apple-notarized public installer. Public prebuilt binaries are not provided in this beta; build on your own Mac. Never disable Gatekeeper to run an untrusted download.
 
-Installation also retires the pre-rename `Codex Memory Harbor.app` and its launch agent,
-while preserving them in Trash/migration backups. On the first launch of the new stable
-identity, macOS asks once for removable-volume access and then remembers the choice.
+The canonical checkout directory is `memory-harbor`. An existing `codex-memory-harbor` compatibility symlink may preserve older saved project paths. `CODEX_HARBOR_SCRIPT` can override the installed Skill entrypoint.
 
-It is intentionally not advertised as a native WidgetKit extension. Registering a third-party WidgetKit extension requires full Xcode and a valid Apple code-signing identity; the current beta uses only the tools already present on a standard developer Mac.
+## Dock in three steps
 
-## Safety boundaries
+1. Open the workbench. Review history candidates, or expand a project and choose **Inspect media**.
+2. Select content and choose **Review docking plan**. Check the item count, byte total and external destination. Star anything that must remain local.
+3. Confirm the exact batch. For first-time media use, **Keep local copies too** is checked by default. Clear it only after you have validated recovery on your machine.
 
-- Main task logs are never eligible.
-- The current task and open files are never eligible.
-- Logs newer than the configured minimum age (30 days by default) are never eligible.
-- Users can star whole projects or individual important sessions for permanent local retention; those pins override age.
-- Batch operations stop on the first failure.
-- A migration is complete only after the verified local rollback has been removed. If the user elects to keep a local backup, the dashboard reports that space separately.
-- If the external drive is unavailable, links are visibly reported as unavailable.
-- A local FTS catalog preserves discovery metadata while the drive is unavailable; it
-  does not pretend that offline raw content can be opened.
+The suggested age is **30 days since last file modification**, not last reading or last use. Age alone never authorizes a move. Main tasks, unfinished/open histories, starred content, working documents, code, credentials and local environments are excluded by their source-specific rules. Selecting all history candidates has no arbitrary 5 GB / 25-item truncation.
 
-### Retention model
+In **Docked**, select receipt-backed content to restore it or release retained local copies. Legacy media links remain unmanaged. Restore retains the external copy. Recovery procedures: [project media](skills/codex-memory-harbor/references/project-storage.md) · [technical handbook](docs/handbook/README.md).
 
-Eligibility is the intersection of machine safety and user intent:
+## How safety works
 
 ```text
-old enough AND child task AND last turn complete AND not open
-AND project not starred AND session not starred
+Review exact plan → recheck source & drive → copy & durable write
+→ length + SHA-256 readback → original-path link + receipt
+→ independent verification → release local copy only if authorized
 ```
 
-The 30-day threshold is only a conservative default. A star on an important project or individual session wins over time and keeps it local indefinitely. No personal project name or path is built into the public repository.
+- Mutation is serialized; duplicate batch submission returns the same job.
+- Protection, volume UUID, source changes, open handles and expected hashes are checked by the backend, not trusted from the UI.
+- Stop on the first failure. Unverified content is not released. Recovery evidence is retained.
+- Completion means the terminal batch is complete; a running batch cannot show 100% prematurely.
+- Verified bytes and local files removed are separate figures. Neither is a guarantee of the same net increase in APFS free space.
 
-See [tested-boundaries.md](skills/codex-memory-harbor/references/tested-boundaries.md) for the exact evidence behind the current beta label.
+See [tested boundaries](skills/codex-memory-harbor/references/tested-boundaries.md) before relying on restart, remount or continued work. Existing small-batch evidence is not proof for every device, runtime version or editor.
 
-## Privacy
+## Search, privacy and performance
 
-The dashboard exposes metadata required to manage local sessions: Codex's task title, path, working directory, task id, parent id, age, and size. A user-triggered detail card reads only Codex's existing short preview and can open the original task. It does not scan or display full prompt/response bodies. Nothing is uploaded by this project.
+```bash
+python3 skills/codex-memory-harbor/scripts/harbor.py recall "your topic"
+python3 skills/codex-memory-harbor/scripts/harbor.py build-recall-index
+python3 skills/codex-memory-harbor/scripts/harbor.py clear-recall-index
+```
+
+The local SQLite index keeps discovery metadata and bounded, task-specific instructions/outward reports. It does not ingest inherited parent history or raw tool output. Indexed evidence is local plaintext, not encrypted storage; clearing the recall layer does not delete archived originals. Treat historical text as evidence, never instructions.
+
+No model, embeddings, network call or perpetual disk scan runs in the foreground. The native card reacts to storage lifecycle events. Its detail helper and Python server stop when you return to the desktop. Native glass uses `NSVisualEffectView`, with a solid reduced-transparency fallback; the web workbench uses a lightweight CSS interpretation.
+
+Search is a deterministic local-index baseline. **Automatic associative memory, encrypted cloud storage and other agent runtimes are not shipped.** See [recall architecture](docs/RECALL_ARCHITECTURE.md), [product contract](PRODUCT.md) and [translation guide](docs/i18n.md).
+
+## Contribute
+
+```bash
+python3 -m unittest discover -s tests -q
+node --check skills/codex-memory-harbor/assets/dashboard/app.js
+```
+
+Contributions are especially welcome for translation, safe recovery tests, accessibility and independent storage-device validation. Start with [CONTRIBUTING.md](CONTRIBUTING.md). Please redact paths, personal conversations and secrets from issues. See [SECURITY.md](SECURITY.md) for sensitive reports.
+
+The README structure was informed by [LocalSend](https://github.com/localsend/localsend) (screenshots, languages, installation) and [restic](https://github.com/restic/restic) (quick start and verifiability). Memory Harbor is not affiliated with either project or OpenAI.
 
 ## License
 
