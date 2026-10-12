@@ -28,7 +28,7 @@ from collections import deque
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-VERSION = "0.4.5-beta.1"
+VERSION = "0.4.5-beta.2"
 DEFAULT_ARCHIVE = "Memory Harbor"
 LEGACY_ARCHIVES = ("Codex Memory Harbor",)
 CATALOG_SCHEMA_VERSION = 3
@@ -1424,6 +1424,126 @@ def offload_project_file(app: dict, data: dict, restore: bool = False) -> dict:
                                keep_local=data.get("keep_local", True) is not False)
 
 
+def parking_plan(app, data):
+    """Freeze an exact mixed selection; adapters retain their own admission rules."""
+    objects = data.get('objects') or []
+    if not isinstance(objects, list) or not 0 < len(objects) <= 10000:
+        raise HarborError('请选择 1 到 10000 个停泊对象')
+    volume = mounted_volume(resolve_storage_target(data)); identity = volume_identity(volume)
+    verify_external_volume(volume, identity.get('uuid', ''))
+    cfg = load_config(); rows = []; seen = set(); archive = DEFAULT_ARCHIVE
+    for obj in objects:
+        if not isinstance(obj, dict):
+            raise HarborError('停泊对象格式无效')
+        path = str(obj.get('path') or '')
+        if path in seen:
+            raise HarborError('停泊对象重复')
+        seen.add(path)
+        kind = obj.get('kind')
+        if kind == 'history':
+            plan = plan_offload(path, app['codex_home'], str(volume), archive, 30,
+                                cfg['protected_projects'], cfg['protected_sessions'])
+            rows.append({'kind': kind, 'source': path, 'bytes': plan['bytes'], 'plan': plan})
+        elif kind == 'file':
+            frozen = app.get('project_plans', {}).get(str(obj.get('plan_id') or ''))
+            if (not frozen or time.time()-frozen['created_at'] > 3600 or frozen['volume'] != str(volume)
+                    or frozen['uuid'] != identity['uuid'] or path not in frozen['rows']):
+                raise HarborError('项目文件不在当前有效的冻结方案中')
+            row = frozen['rows'][path]
+            if is_priority(frozen['root'], cfg['protected_projects']):
+                raise HarborError('项目已设为本机保留，停止停泊')
+            project_archive_module().verify_planned_source(row)
+            rows.append({'kind': kind, 'source': path, 'bytes': row['bytes'],
+                         'row': dict(row), 'root': frozen['root'], 'project_id': frozen['project_id']})
+        else:
+            raise HarborError('不支持的对象来源；不能绕过来源适配器')
+    plans = app.setdefault('parking_plans', {})
+    for key in list(plans):
+        if time.time()-plans[key]['created_at'] > 3600:
+            del plans[key]
+    if len(plans) >= 10:
+        raise HarborError('待确认方案过多，请重新打开港口')
+    plan_id = secrets.token_urlsafe(24)
+    plans[plan_id] = {'objects': rows, 'volume': str(volume), 'uuid': identity['uuid'], 'created_at': time.time()}
+    return {'plan_id': plan_id, 'count': len(rows), 'bytes': sum(row['bytes'] for row in rows),
+            'history_count': sum(row['kind'] == 'history' for row in rows),
+            'file_count': sum(row['kind'] == 'file' for row in rows), 'volume_name': volume.name}
+
+
+def start_parking(app, data):
+    if data.get('confirmation') != 'DOCK SELECTED OBJECTS':
+        raise HarborError('请先确认本次已选择的停泊对象')
+    frozen = app.get('parking_plans', {}).get(str(data.get('plan_id') or ''))
+    if not frozen or time.time()-frozen['created_at'] > 3600:
+        raise HarborError('停泊方案已过期，请重新查看后确认')
+    if data.get('volume') != frozen['volume']:
+        raise HarborError('目标盘已变化，请重新确认')
+    keep_local = data.get('keep_local', True) is not False
+    if frozen.get('job_id'):
+        if frozen['keep_local'] != keep_local:
+            raise HarborError('已提交批次不能更改副本选择')
+        return frozen['job_id']
+    jobs = app.setdefault('parking_jobs', {})
+    for key in list(jobs):
+        if jobs[key]['status'] != 'running' and time.time()-jobs[key]['created_at'] > 3600:
+            del jobs[key]
+    if len(jobs) >= 20:
+        raise HarborError('批次记录过多，请重新打开港口')
+    job_id = secrets.token_urlsafe(24); frozen['job_id'] = job_id; frozen['keep_local'] = keep_local
+    job = {'status': 'running', 'phase': 'waiting', 'completed': 0, 'total': len(frozen['objects']),
+           'bytes': 0, 'total_bytes': sum(row['bytes'] for row in frozen['objects']), 'created_at': time.time()}
+    jobs[job_id] = job
+    def run():
+        tick = time.perf_counter()
+        try:
+            with app['mutation_lock']:
+                core = project_archive_module(); volume = Path(frozen['volume']); items = []
+                def check_volume():
+                    verify_external_volume(volume, frozen['uuid'])
+                    return {'volume_uuid': frozen['uuid'], 'volume_path': str(volume)}
+                check_volume()
+                for descriptor in frozen['objects']:
+                    if descriptor['kind'] == 'history':
+                        item = history_parking_item(descriptor['plan'], volume, DEFAULT_ARCHIVE, app['codex_home'])
+                        def validate(desc=descriptor):
+                            cfg = load_config(); plan = desc['plan']
+                            lexical_session(desc['source'], app['codex_home'])
+                            if is_priority(plan.get('cwd', ''), cfg['protected_projects']) or plan.get('id') in cfg['protected_sessions']:
+                                raise HarborError('历史已设为本机保留，停止停泊')
+                        item['validate'] = validate
+                    else:
+                        row = descriptor['row']; root = volume / DEFAULT_ARCHIVE / 'Project Assets' / descriptor['project_id']
+                        core.safe_directory(root)
+                        def validate(desc=descriptor):
+                            cfg = load_config()
+                            if is_priority(desc['root'], cfg['protected_projects']):
+                                raise HarborError('项目已设为本机保留，停止停泊')
+                            if Path(desc['source']).parent.resolve() != Path(desc['source']).parent:
+                                raise HarborError('项目父目录发生变化，停止停泊')
+                            core.verify_planned_source(desc['row'])
+                        item = {'source': descriptor['source'], 'target': str(root / row['relative']),
+                                'receipt': str(root / 'archive-receipt.jsonl'), 'validate': validate}
+                    items.append(item)
+                prepared = time.perf_counter()-tick
+                result = core.archive_batch(items, check_volume, keep_local=keep_local, progress=job.update)
+                metrics = result['metrics']; metrics['adapter_seconds'] = prepared
+                metrics['end_to_end_seconds'] = time.perf_counter()-tick
+                job.update(status='complete', metrics=metrics, completed=len(result['results']),
+                           bytes=metrics['verified_bytes'])
+                app['cache'] = None
+        except Exception as exc:
+            if isinstance(exc, RuntimeError):
+                exc = HarborError(str(exc))
+            code, message = user_error(exc)
+            if code == 'unexpected_error' and job['completed']:
+                message = '停泊过程中发生异常；已完成对象保留，未完成对象已停止，请核对回执后恢复'
+            job.update(status='failed', error_code=code, error=message,
+                       elapsed_seconds=time.perf_counter()-tick)
+            app['cache'] = None
+    threading.Thread(target=run, daemon=True, name='harbor-parking').start()
+    return job_id
+
+
 def compact_summary(codex_home: Path, repair: bool = False) -> dict:
     """Return only the values needed by the native idle card."""
     if repair:
@@ -1475,7 +1595,13 @@ def durable_directory(path: Path) -> None:
 
 def verify_external_volume(volume: Path, expected_uuid: str) -> None:
     mounted_volume(str(volume))
-    if not expected_uuid or volume_identity(volume).get("uuid") != expected_uuid:
+    try:
+        spec = importlib.util.spec_from_file_location('harbor_volume_probe', Path(__file__).with_name('volume_probe.py'))
+        probe = importlib.util.module_from_spec(spec); spec.loader.exec_module(probe)
+        actual = probe.fresh_uuid(volume)
+    except (OSError, RuntimeError, subprocess.SubprocessError, ValueError) as exc:
+        raise HarborError('无法重新确认外置卷身份，停止操作') from exc
+    if not expected_uuid or actual.upper() != expected_uuid.upper():
         raise HarborError("外置卷身份与停泊方案不一致，停止操作")
 
 
@@ -1542,8 +1668,7 @@ def plan_offload(path_value: str, codex_home: Path, volume_value: str, archive_n
 
 
 def offload_one(plan: dict, volume: Path, archive_name: str, codex_home: Path | None = None) -> dict:
-    with project_archive_module().source_lock(Path(plan["source"])):
-        return _offload_one(plan, volume, archive_name, codex_home)
+    return _offload_one(plan, volume, archive_name, codex_home)
 
 
 def _offload_one(plan: dict, volume: Path, archive_name: str, codex_home: Path | None = None) -> dict:
@@ -1555,45 +1680,38 @@ def _offload_one(plan: dict, volume: Path, archive_name: str, codex_home: Path |
             or source.is_symlink() or not source.is_file()
             or backup.exists() or backup.is_symlink()):
         raise HarborError("来源、目标或回滚副本状态不符合停泊条件")
-    verify_external_volume(volume, plan.get("volume_uuid", ""))
-    if open_handles(source):
-        raise HarborError("来源仍在使用，停止停泊")
-    before = file_signature(source)
-    if plan.get("source_signature") and tuple(plan["source_signature"]) != before:
-        raise HarborError("来源与已确认方案不一致，停止停泊")
-    if before[2] != plan["bytes"] or sha256(source) != plan["sha256"]:
-        raise HarborError("来源内容与已确认方案不一致，停止停泊")
-    recall_result = index_session_memory(str(source), codex_home, plan.get("sha256")) if codex_home else None
-    for ancestor in [destination.parent, *destination.parent.parents]:
-        if ancestor.is_symlink():
-            raise HarborError("外部目标父目录包含链接，停止停泊")
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    if destination.parent.resolve() != destination.parent:
-        raise HarborError("外部目标父目录包含链接，停止停泊")
-    with source.open("rb") as original, destination.open("xb") as copied:
-        shutil.copyfileobj(original, copied, 4 * 1024 * 1024)
-        copied.flush()
-        os.fsync(copied.fileno())
-    durable_directory(destination.parent)
-    if destination.stat().st_size != plan["bytes"] or sha256(destination) != plan["sha256"]:
-        raise HarborError("外部副本校验失败")
-    verify_external_volume(volume, plan.get("volume_uuid", ""))
-    if open_handles(source) or file_signature(source) != before or sha256(source) != plan["sha256"]:
-        raise HarborError("复制期间来源发生变化或正在使用，原件保持不变")
-    os.replace(source, backup)
+    item = history_parking_item(plan, volume, archive_name, codex_home)
+    def handles(path):
+        if open_handles(path):
+            raise HarborError('记录仍在使用，停止停泊')
+    def check_volume():
+        verify_external_volume(volume, plan.get('volume_uuid', ''))
+        return {'volume_uuid': plan.get('volume_uuid', ''), 'volume_path': str(volume)}
     try:
-        source.symlink_to(destination)
-        durable_directory(source.parent)
-        verify_external_volume(volume, plan.get("volume_uuid", ""))
-        if sha256(source) != plan["sha256"] or sha256(backup) != plan["sha256"]:
-            raise HarborError("连续性链接校验失败")
-    except Exception:
-        source.unlink(missing_ok=True); os.replace(backup, source); raise
-    record = {**plan, "volume_path": str(volume), "event": "offloaded_with_local_backup", "recorded_at": int(time.time())}
-    if recall_result:
-        record["recall_fragments"] = recall_result["fragments"]
-    record["manifest"] = append_manifest(volume, archive_name, record)
-    return record
+        result = project_archive_module().archive_batch([item], check_volume, handles, keep_local=True)['results'][0]
+    except RuntimeError as exc:
+        raise HarborError(str(exc)) from exc
+    return {**result, 'event': 'offloaded_with_local_backup',
+            'manifest': str(volume / archive_name / 'manifests/offload_manifest.jsonl')}
+
+
+def history_parking_item(plan, volume, archive_name, codex_home=None):
+    """Codex admission/receipt adapter; byte transactions live in the common core."""
+    source, target = Path(plan['source']), Path(plan['destination'])
+    if plan.get('source_signature') and not source.is_symlink() and tuple(plan['source_signature']) != file_signature(source):
+        raise HarborError('来源与已确认方案不一致，停止停泊')
+    recall = index_session_memory(str(source), codex_home, plan.get('sha256')) if codex_home and not source.is_symlink() else None
+    extra = {**plan, 'event': 'offloaded_with_local_backup'}
+    if recall:
+        extra['recall_fragments'] = recall['fragments']
+    def write(receipt, record):
+        event = 'migrated_external_primary' if record['status'] == 'local_entity_released' else 'offloaded_with_local_backup'
+        return append_manifest(volume, archive_name, {**record, 'event': event})
+    return {'source': str(source), 'target': str(target),
+            'receipt': str(volume / archive_name / 'manifests/offload_manifest.jsonl'),
+            'backup_suffix': '.offload-local-backup', 'expected_hash': plan['sha256'],
+            'source_signature': plan.get('source_signature'), 'record_extra': extra,
+            'read_record': lambda receipt, source, target: recorded_copy(source, target), 'write_record': write}
 
 
 def audit_one(path_value: str, codex_home: Path) -> dict:
@@ -1720,6 +1838,10 @@ class HarborHandler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", "0")); return json.loads(self.rfile.read(length) or b"{}")
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
+        if parsed.path == '/api/parking-job':
+            key = urllib.parse.parse_qs(parsed.query).get('id', [''])[0]
+            job = self.app.get('parking_jobs', {}).get(key)
+            return self.send_json(200 if job else 404, dict(job) if job else {'error': '批次记录不存在'})
         if parsed.path == "/api/scan":
             q = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
             priority = (q["priority"][0] or None) if "priority" in q else (self.app["priority"] or None)
@@ -1756,11 +1878,15 @@ class HarborHandler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store"); self.send_header("Content-Length", str(len(raw))); self.end_headers(); self.wfile.write(raw)
     def do_POST(self):
         if self.headers.get("X-Harbor-Token") != self.app["token"]: return self.send_json(403, {"error_code": "invalid_action_token", "error": "操作令牌无效，请重新打开仪表盘"})
-        mutation_lock = self.app.get("mutation_lock") if self.path in ("/api/offload", "/api/migrate", "/api/finalize", "/api/restore", "/api/project-file-offload", "/api/project-file-restore", "/api/repair-links", "/api/protect", "/api/settings") else None
+        mutation_lock = self.app.get("mutation_lock") if self.path in ("/api/offload", "/api/migrate", "/api/finalize", "/api/restore", "/api/project-file-offload", "/api/project-file-restore", "/api/repair-links", "/api/protect", "/api/settings", '/api/parking-plan', '/api/parking-start') else None
         if mutation_lock:
             mutation_lock.acquire()
         try:
             data = self.body()
+            if self.path == '/api/parking-plan':
+                return self.send_json(200, {'ok': True, 'plan': parking_plan(self.app, data)})
+            if self.path == '/api/parking-start':
+                return self.send_json(200, {'ok': True, 'job_id': start_parking(self.app, data)})
             if self.path == "/api/settings":
                 saved = save_config(data.get("protected_projects", data.get("priority", [])), data.get("protected_sessions", self.app["protected_sessions"])); self.app["priority"] = "\n".join(saved["protected_projects"]); self.app["protected_sessions"] = saved["protected_sessions"]
                 self.app["cache"] = None

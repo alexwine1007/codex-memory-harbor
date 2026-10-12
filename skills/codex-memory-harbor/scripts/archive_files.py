@@ -5,7 +5,7 @@ Copy bytes, verify SHA-256, retain a rollback file until independent validation,
 then leave an absolute link at the original path. Never extracts archive contents.
 """
 import argparse
-from contextlib import contextmanager
+from contextlib import contextmanager, ExitStack
 import fcntl
 import hashlib
 import json
@@ -62,7 +62,10 @@ def source_lock(source):
 
 
 def no_open_handles(path):
-    result = subprocess.run(["lsof", "-nP", "-Fp", str(path)], capture_output=True, timeout=10)
+    paths = path if isinstance(path, (list, tuple)) else [path]
+    if not paths:
+        return
+    result = subprocess.run(["lsof", "-nP", "-Fp", *map(str, paths)], capture_output=True, timeout=10)
     if result.returncode not in (0, 1) or result.stdout or result.stderr:
         raise RuntimeError("文件句柄检查不通过，停止迁移")
 
@@ -131,88 +134,210 @@ def verify_planned_source(row):
         raise RuntimeError("文件与已确认清单不一致，停止操作")
 
 
-def archive_file(source, target, receipt, check_volume, check_handles=no_open_handles, keep_local=False):
-    with source_lock(Path(source)):
-        return _archive_file(source, target, receipt, check_volume, check_handles, keep_local)
-
-
-def _archive_file(source, target, receipt, check_volume, check_handles, keep_local):
-    source, target, receipt = Path(source), Path(target), Path(receipt)
-    if not source.is_absolute() or not target.is_absolute():
-        raise ValueError("必须使用绝对路径")
-    rollback = source.with_name(source.name + ".harbor-archive-rollback")
-    identity = check_volume() or {}
-    if receipt.is_symlink() or receipt.parent.resolve() != receipt.parent:
-        raise RuntimeError("校验记录路径不安全，停止操作")
-    if source.is_symlink():
-        record = previous_record(receipt, source, target)
-        if (not record or os.readlink(source) != str(target)
-                or target.stat().st_size != record["bytes"]
-                or digest(source) != record["sha256"]
-                or identity.get("volume_uuid") and record.get("volume_uuid") != identity["volume_uuid"]):
-            raise RuntimeError("已有链接缺少匹配的校验记录")
-        if rollback.exists() and not keep_local:
-            if rollback.is_symlink():
-                raise RuntimeError("回滚副本不是本机普通文件，停止释放")
-            check_handles(rollback)
-            if rollback.stat().st_size != record["bytes"] or digest(rollback) != record["sha256"]:
-                raise RuntimeError("回滚副本校验不通过，保留本地文件")
-            check_volume()
-            if digest(target) != record["sha256"]:
-                raise RuntimeError("外部实体发生变化，保留本地副本")
-            rollback.unlink()
-            durable_directory(source.parent)
-        return dict(record, status="already_verified")
-    if (not source.is_file() or source.stat().st_nlink != 1 or source.parent.resolve() != source.parent
-            or target.exists() or target.is_symlink() or rollback.exists() or rollback.is_symlink()):
-        raise RuntimeError("来源或目标状态不符合安全条件")
-    check_handles(source)
-    before = signature(source)
-    safe_directory(target.parent)
-    if target.parent.resolve() != target.parent:
-        raise RuntimeError("目标父目录包含链接，停止操作")
-    hasher = hashlib.sha256()
-    with source.open("rb") as original, target.open("xb") as copied:
-        for chunk in iter(lambda: original.read(8 * 1024 * 1024), b""):
-            copied.write(chunk)
-            hasher.update(chunk)
-        copied.flush()
-        os.fsync(copied.fileno())
-    durable_directory(target.parent)
-    expected = hasher.hexdigest()
-    check_volume()
-    if signature(source) != before or target.stat().st_size != before[2] or digest(target) != expected:
-        raise RuntimeError("复制校验不通过，原文件未变更")
-    check_handles(source)
-    if signature(source) != before:
-        raise RuntimeError("来源发生变化，原文件未变更")
-    os.rename(source, rollback)
+def archive_file(source, target, receipt, check_volume, check_handles=no_open_handles, keep_local=False, **options):
+    item = dict(source=str(source), target=str(target), receipt=str(receipt), **options)
     try:
-        source.symlink_to(target)
-        durable_directory(source.parent)
+        return archive_batch([item], check_volume, check_handles, keep_local)['results'][0]
+    except FileExistsError as exc:
+        raise RuntimeError('来源或目标状态不符合安全条件') from exc
+
+
+def _read(item):
+    return item.get('read_record', previous_record)(Path(item['receipt']), Path(item['source']), Path(item['target']))
+
+
+def _write(item, record):
+    return item.get('write_record', append_receipt)(Path(item['receipt']), record)
+
+
+def _backup(item):
+    source = Path(item['source'])
+    return source.with_name(source.name + item.get('backup_suffix', '.harbor-archive-rollback'))
+
+
+def _validate(item):
+    if item.get('validate'):
+        item['validate']()
+
+
+def _existing(item, check_volume, check_handles, keep_local):
+    source, target, rollback = Path(item['source']), Path(item['target']), _backup(item)
+    receipt = Path(item['receipt'])
+    if receipt.is_symlink() or receipt.parent.resolve() != receipt.parent:
+        raise RuntimeError('校验记录路径不安全，停止操作')
+    identity = check_volume() or {}; record = _read(item)
+    if (not record or os.readlink(source) != str(target) or target.is_symlink()
+            or source.parent.resolve() != source.parent or target.parent.resolve() != target.parent
+            or target.stat().st_size != record['bytes'] or digest(source) != record['sha256']
+            or identity.get('volume_uuid') and record.get('volume_uuid') != identity['volume_uuid']):
+        raise RuntimeError('已有链接缺少匹配的校验记录')
+    if rollback.exists() and not keep_local:
+        if rollback.is_symlink():
+            raise RuntimeError('回滚副本不是本机普通文件，停止释放')
+        check_handles(rollback); check_handles(target); _validate(item)
         check_volume()
-        if (os.readlink(source) != str(target) or source.stat().st_size != before[2]
-                or digest(source) != expected or digest(rollback) != expected):
-            raise RuntimeError("独立复核失败")
-        record = {"source": str(source), "target": str(target), "bytes": before[2],
-                  "sha256": expected, "status": "verified_before_release", "recorded_at": int(time.time()), **identity}
-        append_receipt(receipt, record)
-        check_handles(rollback)
-        check_volume()
-        if digest(target) != expected or digest(rollback) != expected:
-            raise RuntimeError("释放前内容发生变化，保留本地文件")
-    except BaseException:
-        if source.is_symlink() and os.readlink(source) == str(target):
-            source.unlink()
-        if not source.exists() and not source.is_symlink():
-            os.rename(rollback, source)
-        raise
-    if keep_local:
-        return dict(record, status="verified_with_local_backup")
-    rollback.unlink()
-    durable_directory(source.parent)
-    append_receipt(receipt, dict(record, status="local_entity_released"))
-    return dict(record, status="local_entity_released")
+        if (rollback.stat().st_size != record['bytes'] or digest(rollback) != record['sha256']
+                or digest(target) != record['sha256']):
+            raise RuntimeError('释放前内容发生变化，保留本地文件')
+        rollback.unlink(); durable_directory(source.parent)
+        _write(item, dict(record, status='local_entity_released'))
+    return dict(record, status='already_verified')
+
+
+def archive_batch(items, check_volume, check_handles=no_open_handles, keep_local=False, progress=None):
+    """Runtime-neutral serial transactions, bounded phase batches, no safety-gate cache.
+
+    Each path participates in all three *fresh* handle checkpoints. Small files
+    share a single lsof invocation per phase; large files get their own batch.
+    Copy, flush, target readback, link/rollback readback and pre-release readback
+    remain per-file. No pipeline runs ahead after the first error.
+    """
+    if not items or len({str(row['source']) for row in items}) != len(items):
+        raise ValueError('停泊清单为空或来源重复')
+    if len({str(row['target']) for row in items}) != len(items):
+        raise ValueError('停泊目标重复')
+    started = time.perf_counter(); timings = {}; results = []; copied_bytes = 0
+    total_bytes = sum(Path(row['source']).stat().st_size for row in items)
+    @contextmanager
+    def stage(name):
+        if progress:
+            progress(dict(phase=name, completed=len(results), total=len(items),
+                          bytes=sum(row['bytes'] for row in results), total_bytes=total_bytes,
+                          elapsed_seconds=time.perf_counter()-started))
+        tick = time.perf_counter()
+        try:
+            yield
+        finally:
+            timings[name] = timings.get(name, 0) + time.perf_counter()-tick
+            if progress:
+                progress(dict(phase=name, completed=len(results), total=len(items),
+                              bytes=sum(row['bytes'] for row in results), total_bytes=total_bytes,
+                              elapsed_seconds=time.perf_counter()-started))
+    def handles(paths):
+        # Injected single-path guards remain compatible with the legacy API.
+        if check_handles is no_open_handles:
+            check_handles(paths)
+        else:
+            for path in paths:
+                check_handles(path)
+    pending = []
+    def execute(chunk):
+        nonlocal copied_bytes
+        with ExitStack() as locks:
+            for item in chunk:
+                locks.enter_context(source_lock(Path(item['source'])))
+            with stage('admission'):
+                identity = check_volume() or {}
+                for item in chunk:
+                    _validate(item)
+                    source, target, receipt = map(Path, (item['source'], item['target'], item['receipt']))
+                    if (not source.is_absolute() or not target.is_absolute() or not source.is_file()
+                            or source.is_symlink() or source.stat().st_nlink != 1
+                            or source.parent.resolve() != source.parent):
+                        raise RuntimeError('来源或目标状态不符合安全条件')
+                    if target.exists() or target.is_symlink():
+                        raise FileExistsError('目标已经存在，停止覆盖')
+                    rollback = _backup(item)
+                    if rollback.exists() or rollback.is_symlink():
+                        raise RuntimeError('本地回滚副本已存在，停止操作')
+                    if receipt.is_symlink() or receipt.parent.resolve() != receipt.parent:
+                        raise RuntimeError('校验记录路径不安全，停止操作')
+                    item['_before'] = signature(source)
+                    if item.get('source_signature') and tuple(item['source_signature']) != item['_before']:
+                        raise RuntimeError('来源与已确认方案不一致，停止操作')
+                    safe_directory(target.parent)
+                handles([Path(item['source']) for item in chunk])
+            with stage('copy_flush'):
+                for item in chunk:
+                    hasher = hashlib.sha256()
+                    with Path(item['source']).open('rb') as original, Path(item['target']).open('xb') as copied:
+                        for block in iter(lambda: original.read(8*1024*1024), b''):
+                            copied.write(block); hasher.update(block); copied_bytes += len(block)
+                        copied.flush(); os.fsync(copied.fileno())
+                    durable_directory(Path(item['target']).parent)
+                    item['_hash'] = hasher.hexdigest()
+                    if item.get('expected_hash') and item['_hash'] != item['expected_hash']:
+                        raise RuntimeError('来源内容与已确认方案不一致，停止操作')
+            with stage('target_verify'):
+                check_volume()
+                for item in chunk:
+                    source, target = Path(item['source']), Path(item['target'])
+                    if (signature(source) != item['_before'] or target.stat().st_size != item['_before'][2]
+                            or digest(target) != item['_hash']):
+                        raise RuntimeError('复制校验不通过，原文件未变更')
+                handles([Path(item['source']) for item in chunk])
+            changed = []; released = set()
+            try:
+                with stage('link_verify_receipt'):
+                    for item in chunk:
+                        _validate(item); source, target, rollback = Path(item['source']), Path(item['target']), _backup(item)
+                        if signature(source) != item['_before']:
+                            raise RuntimeError('来源发生变化，原文件未变更')
+                        os.rename(source, rollback); changed.append(item)
+                        source.symlink_to(target); durable_directory(source.parent)
+                        check_volume()
+                        if (os.readlink(source) != str(target) or source.stat().st_size != item['_before'][2]
+                                or digest(source) != item['_hash'] or digest(rollback) != item['_hash']):
+                            raise RuntimeError('独立复核失败')
+                        record = dict(item.get('record_extra', {}), source=str(source), target=str(target),
+                                      bytes=item['_before'][2], sha256=item['_hash'], status='verified_before_release',
+                                      recorded_at=int(time.time()), **identity)
+                        _write(item, record); item['_record'] = record
+                with stage('release_verify'):
+                    handles([path for item in chunk for path in (_backup(item), Path(item['target']))])
+                    for item in chunk:
+                        _validate(item); check_volume()
+                        source, target, rollback = Path(item['source']), Path(item['target']), _backup(item)
+                        record = item['_record']
+                        if (not source.is_symlink() or os.readlink(source) != str(target)
+                                or target.is_symlink() or rollback.is_symlink()
+                                or target.parent.resolve() != target.parent
+                                or target.stat().st_size != record['bytes'] or rollback.stat().st_size != record['bytes']
+                                or digest(target) != record['sha256'] or digest(rollback) != record['sha256']):
+                            raise RuntimeError('释放前内容发生变化，保留本地文件')
+                        if not keep_local:
+                            rollback.unlink(); released.add(str(source)); durable_directory(source.parent)
+                            results.append(dict(record, status='local_entity_released'))
+                            _write(item, dict(record, status='local_entity_released'))
+                        else:
+                            results.append(dict(record, status='verified_with_local_backup'))
+                        released.add(str(source))  # A completed retained-backup transaction stays committed too.
+            except BaseException:
+                for item in reversed(changed):
+                    source, rollback = Path(item['source']), _backup(item)
+                    if str(source) in released:
+                        continue  # Verified external-only transactions remain committed.
+                    if source.is_symlink() and os.readlink(source) == item['target']:
+                        source.unlink()
+                    if not source.exists() and not source.is_symlink() and rollback.exists():
+                        os.rename(rollback, source); durable_directory(source.parent)
+                raise
+    for original in items:
+        item = dict(original); source = Path(item['source'])
+        if source.is_symlink():
+            if pending:
+                execute(pending); pending = []
+            with source_lock(source), stage('retry_verify'):
+                _validate(item); results.append(_existing(item, check_volume, check_handles, keep_local))
+            continue
+        # <=32 paths and <=4 MiB per checkpoint group. Large files stand alone.
+        size = source.stat().st_size
+        if pending and (len(pending) >= 32 or sum(Path(row['source']).stat().st_size for row in pending)+size > 4*1024*1024):
+            execute(pending); pending = []
+        pending.append(item)
+    if pending:
+        execute(pending)
+    elapsed = time.perf_counter()-started
+    metrics = dict(elapsed_seconds=elapsed, stage_seconds=timings, bytes=total_bytes,
+                   copied_bytes=copied_bytes, verified_bytes=sum(row['bytes'] for row in results),
+                   files=len(results), mib_per_second=total_bytes/max(elapsed, 0.000001)/1048576,
+                   efficiency=None, efficiency_note='未标定物理路径上限；此数值不是硬件效率')
+    if progress:
+        progress(dict(phase='complete', completed=len(results), total=len(items), bytes=metrics['verified_bytes'],
+                      total_bytes=total_bytes, elapsed_seconds=elapsed, metrics=metrics))
+    return {'results': results, 'metrics': metrics}
+
+
 
 
 def restore_file(source, target, receipt, check_volume, check_handles=no_open_handles):
@@ -277,8 +402,8 @@ def main():
         parser.error("本批次文件名重复")
 
     def check_volume():
-        info = plistlib.loads(subprocess.check_output(["diskutil", "info", "-plist", str(volume)]))
-        if info.get("VolumeUUID") != args.volume_uuid or info.get("MountPoint") != str(volume):
+        from volume_probe import fresh_uuid
+        if fresh_uuid(volume) != args.volume_uuid.upper():
             raise RuntimeError("外置卷身份不匹配，停止操作")
         return {"volume_uuid": args.volume_uuid, "volume_path": str(volume)}
 
@@ -292,17 +417,23 @@ def main():
         return
     safe_directory(destination)
     receipt = destination / "archive-receipt.jsonl"
+    batch = []
     for number, source in enumerate(sources, 1):
-        if rows and not args.restore:
-            verify_planned_source(rows[number - 1])
-        print(f"[{number}/{len(sources)}] 开始复制与校验：{source.name}", flush=True)
         relative = rows[number - 1]["relative"] if project_plan else source.name
         if args.restore:
             record = restore_file(source, destination / relative, receipt, check_volume)
         else:
-            record = archive_file(source, destination / relative, receipt, check_volume,
-                                  keep_local=project_plan and not args.release_local)
+            item = dict(source=str(source), target=str(destination / relative), receipt=str(receipt))
+            if rows:
+                item['validate'] = lambda row=rows[number-1]: verify_planned_source(row)
+            batch.append(item)
+            continue
         print(json.dumps(record, ensure_ascii=False), flush=True)
+    if batch:
+        result = archive_batch(batch, check_volume, keep_local=project_plan and not args.release_local,
+                               progress=lambda value: print(json.dumps(value, ensure_ascii=False), flush=True))
+        for record in result['results']:
+            print(json.dumps(record, ensure_ascii=False), flush=True)
 
 
 if __name__ == "__main__":

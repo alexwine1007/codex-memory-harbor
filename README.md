@@ -5,11 +5,19 @@
 Memory Harbor safely docks old Codex **child-task session logs** on a permanently attached external drive while preserving their original paths through verified symlinks.
 
 0.4.5 beta also docks old project media through the same original-path model. In the
-dashboard, choose a saved project under **项目文件与历史**, review the frozen file plan,
+dashboard, switch the existing list to **项目文件**, choose a saved project and review the frozen file plan,
 then select media for docking. Project directories, working documents, scripts and local
 environments remain in place. Local backups are enabled by default; restoration and later
 release are available for receipt-backed media. See the
 [project storage contract](skills/codex-memory-harbor/references/project-storage.md).
+
+0.4.5-beta.2 uses one docking engine and one bottom action for history and project
+files, preserving existing manifests, rollback paths and recovery entrypoints.
+Bounded small-file checkpoint groups reduce repeated process startup without
+removing per-file SHA-256, durable writes, independent readback or release checks.
+Run `python3 scripts/benchmark_parking.py --volume /Volumes/YOUR_DRIVE` for a bounded,
+disposable-fixture comparison. It does not operate on personal files or claim a
+cache-independent device ceiling.
 
 Version 0.4 adds a traceable local recall layer on top of the rebuildable catalog and
 stable-volume identity introduced in 0.3.

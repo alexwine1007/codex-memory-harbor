@@ -1,7 +1,7 @@
 # 桌面端与仪表盘
 
 - 状态：当前实现，包含已记录的设计债务
-- 适用版本：Memory Harbor 0.4.5-beta.1（macOS）
+- 适用版本：Memory Harbor 0.4.5-beta.2（macOS）
 - 最后验证：2026-10-12
 
 ## 用途
@@ -67,6 +67,7 @@ WKWebView 中的静态 HTML / CSS / JavaScript
 - `GET /api/catalog`
 - `GET /api/search`
 - `GET /api/recall`
+- `GET /api/parking-job?id=…`（仅查看已提交批次进度，不触发迁移）
 
 操作接口：
 
@@ -86,8 +87,12 @@ WKWebView 中的静态 HTML / CSS / JavaScript
 - `POST /api/project-plan`（按需盘点、生成卷身份绑定的冻结文件方案）
 - `POST /api/project-file-offload`（执行明确选中的单个素材，默认保留本地副本）
 - `POST /api/project-file-restore`（按原始回执恢复单个素材）
+- `POST /api/parking-plan`（冻结所选历史与项目文件；仍经过各来源的保护门）
+- `POST /api/parking-start`（明确确认后启动同一个停泊引擎，重复方案返回原批次 id）
 
 项目盘点不加入普通历史扫描；候选素材与历史容量分别显示。素材列表按目录分组、每页 100 项，全选覆盖完整冻结方案。项目方案详情与恢复边界见[项目存储](../../skills/codex-memory-harbor/references/project-storage.md)。
+
+0.4.5-beta.2 在原列表内切换“任务历史 / 项目文件”，共用底部“停泊所选”、确认窗口与进度窗口。项目盘点不是第二个应用或项目专用弹窗。阶段耗时在完成窗口中折叠展示；空闲不轮询批次进度。旧停泊、校验、释放与恢复接口继续保留。
 
 部分 POST 接口本质上偏读取，但仍要求操作令牌。HTTP 方法不是安全等级，底层操作合同才是判断依据。
 

@@ -204,6 +204,63 @@ class ProjectStorageTests(unittest.TestCase):
             self.assertFalse(log.is_symlink())
 
 
+    def test_mixed_selection_real_http_job_preserves_legacy_history_and_file_restore(self):
+        import threading
+        state = {'local-projects': {'project-1': {'name': 'Fixture Project', 'rootPaths': [str(self.project)]}}}
+        (self.home / '.codex-global-state.json').write_text(json.dumps(state))
+        log = self.home / 'sessions/old.jsonl'; log.parent.mkdir()
+        log.write_text(json.dumps({'type':'session_meta','payload':{'id':'child','parent_thread_id':'parent','cwd':str(self.project)}}) + '\n' +
+                       json.dumps({'type':'event_msg','payload':{'type':'task_complete'}}) + '\n')
+        old = time.time() - 60*86400; os.utime(log, (old, old))
+        original_log, original_file = log.read_bytes(), self.source.read_bytes()
+        server = harbor.ThreadingHTTPServer(('127.0.0.1', 0), harbor.HarborHandler)
+        app = server.app = {'token':'test-token', 'assets':self.root, 'codex_home':self.home, 'priority':'',
+                            'protected_sessions':[], 'cache':None, 'cache_lock':threading.Lock(), 'mutation_lock':threading.Lock()}
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close); self.addCleanup(server.shutdown)
+        def post(path, value):
+            request = urllib.request.Request(f'http://127.0.0.1:{server.server_port}{path}', data=json.dumps(value).encode(),
+                      headers={'X-Harbor-Token':'test-token', 'Content-Type':'application/json'}, method='POST')
+            return json.loads(urllib.request.urlopen(request, timeout=10).read())
+        with mock.patch.object(harbor, 'mounted_volume', return_value=self.volume), \
+             mock.patch.object(harbor, 'volume_identity', return_value={'uuid':'VOL-1'}), \
+             mock.patch.object(harbor, 'verify_external_volume'), mock.patch.object(harbor, 'available_volumes', return_value=[]), \
+             mock.patch.object(harbor, 'project_archive_module', return_value=archive), \
+             mock.patch.object(harbor, 'open_handles', return_value=0):
+            project_plan = post('/api/project-plan', {'project_id':'project-1', 'volume':str(self.volume)})['plan']
+            objects = [{'kind':'history','path':str(log)}, {'kind':'file','path':str(self.source), 'plan_id':project_plan['plan_id']}]
+            for invalid in [objects+[objects[0]], [None], [{'kind':'unknown','path':str(log)}],
+                            [{'kind':'file','path':'/etc/passwd','plan_id':project_plan['plan_id']}]]:
+                with self.assertRaises(urllib.error.HTTPError):
+                    post('/api/parking-plan', {'objects':invalid, 'volume':str(self.volume)})
+            plan = post('/api/parking-plan', {'objects':objects, 'volume':str(self.volume)})['plan']
+            self.assertEqual((plan['history_count'], plan['file_count']), (1,1))
+            request = {'plan_id':plan['plan_id'], 'volume':str(self.volume), 'keep_local':False,
+                       'confirmation':'DOCK SELECTED OBJECTS'}
+            with self.assertRaises(harbor.HarborError): harbor.start_parking(app, dict(request, confirmation=''))
+            with self.assertRaises(harbor.HarborError): harbor.start_parking(app, dict(request, volume='/Volumes/Other'))
+            started = post('/api/parking-start', request)
+            for _ in range(100):
+                job = json.loads(urllib.request.urlopen(f'http://127.0.0.1:{server.server_port}/api/parking-job?id={started["job_id"]}').read())
+                if job['status'] != 'running': break
+                time.sleep(.03)
+            self.assertEqual(job['status'], 'complete', job)
+            self.assertEqual(job['completed'], 2)
+            self.assertEqual(job['bytes'], len(original_log)+len(original_file))
+            self.assertEqual(post('/api/parking-start', request)['job_id'], started['job_id'])
+            with self.assertRaises(harbor.HarborError): harbor.start_parking(app, dict(request, keep_local=True))
+            self.assertTrue(log.is_symlink()); self.assertTrue(self.source.is_symlink())
+            self.assertEqual(log.read_bytes(), original_log); self.assertEqual(self.source.read_bytes(), original_file)
+            self.assertTrue(harbor.audit_one(str(log), self.home)['verified'])
+            self.assertFalse(Path(str(log)+'.offload-local-backup').exists())
+            harbor.restore_one(str(log), self.home)
+            plan = post('/api/project-plan', {'project_id':'project-1', 'volume':str(self.volume)})['plan']
+            post('/api/project-file-restore', {'plan_id':plan['plan_id'], 'path':str(self.source), 'volume':str(self.volume),
+                 'confirmation':'RESTORE PROJECT FILE'})
+            self.assertFalse(log.is_symlink()); self.assertFalse(self.source.is_symlink())
+            self.assertEqual(log.read_bytes(), original_log); self.assertEqual(self.source.read_bytes(), original_file)
+
+
 class PhysicalVolumeSmokeTest(unittest.TestCase):
     @unittest.skipUnless(os.environ.get('MEMORY_HARBOR_TEST_VOLUME'), 'explicit disposable-volume smoke test only')
     def test_original_path_read_release_and_restore_on_actual_volume(self):

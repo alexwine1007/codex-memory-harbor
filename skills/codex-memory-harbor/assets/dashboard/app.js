@@ -10,6 +10,7 @@ let searchMatches=null;
 let searchResults=[];
 let searchTimer=0;
 let operationBusy=false;
+let contentMode='history';
 let projectFilePlan=null;
 let projectFilePage=0;
 const selectedProjectFiles=new Set();
@@ -89,8 +90,7 @@ function bindStoragePicker(){
 }
 function render(){
   const totals=data.totals;
-  $('#eligible').textContent=totals.eligible_h;
-  $('#heroText').textContent=(totals.eligible_files?`${totals.eligible_files} 段已经完成的历史符合安全条件。`:'今天没有新增可停泊历史。')+'这里不含已停泊历史，也不含项目视频、图片等大素材；素材请查看项目存储方案。';
+  renderHero();
   $('#free').textContent=data.disk.free_h;$('#diskBar').style.width=data.disk.used_percent+'%';
   $('#protected').textContent=totals.main_files+' 个';$('#linked').textContent=totals.linked_files+' 个';$('#rollback').textContent=totals.rollback_h;
   const recalled=data.catalog?.recall_sessions||0;
@@ -184,9 +184,10 @@ function renderProjects(){
 }
 function updateSelection(){
   const items=data.sessions.filter(item=>selected.has(item.path)),projects=new Set(items.map(item=>item.project_id||'__standalone__')),linkedMode=filter==='linked';
-  $('#selected').textContent=items.length?`已选 ${items.length} 个历史对象 · ${projects.size} 个分组`:'未选择历史';
-  $('#selectedSize').textContent=fmt(items.reduce((total,item)=>total+(item.backup_exists?item.backup_bytes:item.logical),0));
-  $('#offload').disabled=operationBusy||!items.length;$('#offload').textContent=operationBusy?'操作进行中…':items.length?(linkedMode?'管理所选':'停泊所选'):(linkedMode?'选择已停泊历史':'选择历史后停泊');
+  const files=(projectFilePlan?.files.files||[]).filter(row=>selectedProjectFiles.has(row.source)),count=items.length+files.length;
+  $('#selected').textContent=count?`已选 ${items.length} 段历史${files.length?` · ${files.length} 个文件`:''}`:'选择需要停泊的内容';
+  $('#selectedSize').textContent=fmt(items.reduce((total,item)=>total+(item.backup_exists?item.backup_bytes:item.logical),0)+files.reduce((sum,row)=>sum+row.bytes,0));
+  $('#offload').disabled=operationBusy||!count;$('#offload').textContent=operationBusy?'操作进行中…':count?(linkedMode&&items.length&&!files.length?'管理所选':'停泊所选'):'选择后停泊';
   $('#optimize').disabled=operationBusy;$('#selectAll').disabled=operationBusy;
 }
 async function post(path,body){const response=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json','X-Harbor-Token':token},body:JSON.stringify(body)});const json=await response.json();if(!response.ok||!json.ok)throw Error(json.error||'操作失败');return json}
@@ -201,6 +202,7 @@ function recommendedItems(){
   return result;
 }
 function selectRecommended(){
+  setContentMode('history');
   selected.clear();recommended.clear();for(const item of recommendedItems()){selected.add(item.path);recommended.add(item.path)}
   expandedGroups.clear();for(const group of groups())if(group.items.some(item=>selected.has(item.path)))expandedGroups.add(group.key);
   filter='recommended';$('#recommendedTab').hidden=false;document.querySelectorAll('[data-filter]').forEach(button=>button.classList.toggle('active',button.dataset.filter==='recommended'));
@@ -208,33 +210,41 @@ function selectRecommended(){
 }
 async function prepareMigration(items,title='停泊所选历史'){
   if(operationBusy){toast('已有停泊操作正在进行');return}
-  operationBusy=true;updateSelection();
+  operationBusy=true;updateSelection();renderProjectStorage();let success=false,hadFiles=false;
   try{
     if(!$('#volume').value)throw Error('请先连接并选择一个可写外置盘');
-    if(!items.length)throw Error('请先选择要停泊的历史');
-    const plan=await post('/api/plan',base(items.map(item=>item.path))),total=plan.results.reduce((sum,item)=>sum+item.bytes,0);
-    const confirmed=await ask(title,`<p>将停泊 <b>${items.length}</b> 个已完成历史对象，共 <b>${fmt(total)}</b>。</p><p>每项都会先复制、校验并建立可读取连接；独立复核通过后才释放本地实体。</p><label class="backup-option"><input id="keepLocalBackup" type="checkbox"><span><b>同时保留本地副本</b><small>用于额外观察；不会释放这部分内盘空间</small></span></label>`);
+    const files=(projectFilePlan?.files.files||[]).filter(row=>selectedProjectFiles.has(row.source));hadFiles=files.length>0;
+    if(items.some(item=>item.linked))throw Error('已停泊历史请先管理，不与新停泊文件混选');
+    const objects=[...items.map(item=>({kind:'history',path:item.path})),...files.map(row=>({kind:'file',path:row.source,plan_id:projectFilePlan.plan_id}))];
+    if(!objects.length)throw Error('请先选择需要停泊的内容');
+    const response=await post('/api/parking-plan',{objects,volume:$('#volume').value}),plan=response.plan;
+    const confirmed=await ask('确认停泊',`<p>${plan.history_count} 段任务历史${plan.file_count?` · ${plan.file_count} 个项目文件`:''}，共 <b>${fmt(plan.bytes)}</b>，停泊到 ${esc(plan.volume_name)}。</p><p>原入口继续使用。复制、校验和独立复核通过后，才会释放本机实体。</p><label class="backup-option"><input id="keepLocalBackup" type="checkbox" ${hadFiles?'checked':''}><span><b>同时保留本地副本</b><small>勾选时不腾出这部分空间；取消勾选后，验证通过才释放。外盘断开时原文件暂时不可读。</small></span></label>`);
     const keepLocalBackup=Boolean($('#keepLocalBackup')?.checked);
     if(!confirmed)return;
-    await executeMigration(items,{keepLocalBackup});
-  }finally{operationBusy=false;updateSelection()}
+    success=await executeMigration(plan,{keepLocalBackup});
+  }finally{operationBusy=false;updateSelection();renderProjectStorage()}
+  if(success&&hadFiles)await showProjectPlan();
 }
 function setProgress(completed,total,bytes,totalBytes,stage){$('#progressCount').textContent=`${completed} / ${total}`;$('#progressBytes').textContent=`${fmt(bytes)} / ${fmt(totalBytes)}`;$('#progressFill').style.width=(total?completed/total*100:0)+'%';$('#progressStage').textContent=stage}
-async function executeMigration(items,{keepLocalBackup=false}={}){
-  const dialog=$('#progressDialog'),totalBytes=items.reduce((sum,item)=>sum+item.logical,0);$('#progressClose').disabled=true;$('#progressTitle').textContent=keepLocalBackup?'正在停泊并保留副本':'正在安全停泊';setProgress(0,items.length,0,totalBytes,'逐条复制、验证并建立连续性连接…');dialog.showModal();
-  let completed=0,bytes=0,released=0;
+async function executeMigration(plan,{keepLocalBackup=false}={}){
+  const dialog=$('#progressDialog');$('#progressClose').disabled=true;$('#progressTitle').textContent='正在安全停泊';setProgress(0,plan.count,0,plan.bytes,'准备复制与校验…');$('#transferReport').hidden=true;dialog.showModal();
+  const phases={waiting:'等待当前操作完成',admission:'检查文件是否仍在使用',copy_flush:'复制与持久化写入',target_verify:'回读校验外盘副本',link_verify_receipt:'验证原路径与回滚副本',release_verify:'释放前独立复核',retry_verify:'验证已有停泊记录',complete:'全部验证完成'};
   try{
-    for(const item of items){
-      setProgress(completed,items.length,bytes,totalBytes,`正在处理 ${item.name}`);
-      const response=await post(keepLocalBackup?'/api/offload':'/api/migrate',base([item.path]));
-      released+=Number(response.results?.[0]?.bytes_released||0);completed++;bytes+=item.logical;
-      setProgress(completed,items.length,bytes,totalBytes,keepLocalBackup?`已停泊并保留 ${completed} 项`:`已停泊并释放 ${completed} 项`);
-    }
-    $('#progressTitle').textContent=keepLocalBackup?'本轮停泊完成':'本轮安全停泊完成';
-    $('#progressStage').textContent=keepLocalBackup?'已保留本地副本；外置盘原件和原路径连接均已验证。':`已释放 ${fmt(released)} 内盘空间；外置盘在线时 Codex 可沿原路径读取。`;
-    selected.clear();recommended.clear();await refresh();
-  }catch(error){$('#progressTitle').textContent='操作已安全停止';$('#progressStage').textContent=`${error.message}；未通过校验的任务不会删除本地文件。`;toast(error.message,true)}
-  $('#progressClose').disabled=false;
+    const response=await post('/api/parking-start',{plan_id:plan.plan_id,volume:$('#volume').value,keep_local:keepLocalBackup,confirmation:'DOCK SELECTED OBJECTS'});
+    let job;
+    do{
+      const result=await fetch('/api/parking-job?'+new URLSearchParams({id:response.job_id}));if(!result.ok)throw Error('无法读取批次进度，请先检查已保存的回执');job=await result.json();
+      setProgress(job.completed,job.total,job.bytes,job.total_bytes,phases[job.phase]||'正在验证');
+      if(job.status==='failed')throw Error(job.error);
+      if(job.status==='running')await new Promise(resolve=>setTimeout(resolve,700));
+    }while(job.status==='running');
+    const metrics=job.metrics,elapsed=metrics.end_to_end_seconds||metrics.elapsed_seconds;
+    $('#progressTitle').textContent='停泊完成';$('#progressStage').textContent=keepLocalBackup?'原路径已验证，本地副本已保留。':`已验证并释放 ${fmt(job.bytes)}；外盘在线时原入口继续使用。`;
+    const rate=job.bytes/Math.max(elapsed,.001);$('#transferReport').hidden=false;$('#transferSummary').textContent=`${elapsed.toFixed(1)} 秒 · ${rate>=1048576?`安全流水线平均 ${(rate/1048576).toFixed(1)} MiB/s`:`${job.completed} 项已验证`}`;
+    $('#transferDetails').innerHTML=Object.entries(metrics.stage_seconds).map(([key,seconds])=>`<p>${esc(phases[key]||key)}：${seconds.toFixed(2)} 秒</p>`).join('')+'<p>未标定物理路径上限，不据此宣称硬件效率达标。</p>';
+    selected.clear();selectedProjectFiles.clear();recommended.clear();await refresh();return true;
+  }catch(error){$('#progressTitle').textContent='操作已停止';$('#progressStage').textContent=`${error.message}；未通过校验的内容不会释放本地实体。`;toast(error.message,true);return false}
+  finally{$('#progressClose').disabled=false}
 }
 
 $('#compact').onclick=()=>location.href='harbor://compact';
@@ -245,7 +255,7 @@ $('#sortBy').onchange=()=>{sortBy=$('#sortBy').value;frozenProjectOrder=null;pin
 document.querySelectorAll('[data-filter]').forEach(button=>button.onclick=()=>{document.querySelectorAll('[data-filter]').forEach(item=>item.classList.remove('active'));button.classList.add('active');filter=button.dataset.filter;frozenProjectOrder=null;pinnedInView.clear();if(filter!=='recommended'){selected.clear();recommended.clear();$('#recommendedTab').hidden=true}renderProjects();updateSelection()});
 $('#selectAll').onclick=()=>{const items=selectRecommended();toast(items.length?`已推荐 ${items.length} 个安全候选，可逐项调整`:'暂时没有符合条件的候选')};
 $('#optimize').onclick=async()=>{try{const items=selectRecommended();if(!items.length)throw Error('暂时没有符合 30 天安全条件的已完成历史');await prepareMigration(items,'查看停泊方案 · 本轮建议')}catch(error){toast(error.message,true)}};
-$('#offload').onclick=async()=>{try{if(filter==='linked'){$('#manageDialog').showModal();return}await prepareMigration(data.sessions.filter(item=>selected.has(item.path)))}catch(error){toast(error.message,true)}};
+$('#offload').onclick=async()=>{try{if(filter==='linked'&&selected.size&&!selectedProjectFiles.size){$('#manageDialog').showModal();return}await prepareMigration(data.sessions.filter(item=>selected.has(item.path)))}catch(error){toast(error.message,true)}};
 $('#progressClose').onclick=()=>$('#progressDialog').close();
 $('#openInCodex').onclick=async()=>{
   if(!activeTaskId)return;
@@ -266,23 +276,40 @@ $('#finalize').onclick=async()=>{try{$('#manageDialog').close();if(!await ask('�
 init().catch(error=>toast(error.message,true));
 
 function installProjectStorage(){
-  const section=document.createElement('section');section.className='panel project-storage';section.id='projectStorage';
-  section.innerHTML='<div class="panel-head"><div><h2>项目文件与历史</h2><p>大素材停泊到外置盘，原项目入口和文件路径继续使用。</p></div><div class="panel-tools"><select id="storageProject" aria-label="选择项目"></select><button id="projectPlanButton">查看项目存储方案</button></div></div><p class="storage-note">只在你查看方案时盘点项目素材；工作文件、环境与既有链接保留原位。</p>';
-  document.querySelector('main > .panel').before(section);
-  const dialog=document.createElement('dialog');dialog.id='projectFileDialog';dialog.className='project-file-dialog';
-  dialog.innerHTML='<span class="task-dialog-kicker">项目存储方案</span><h3 id="projectFileTitle"></h3><div id="projectFileSummary"></div><div class="project-file-tools"><button id="projectFilesSelectAll">全选候选素材</button><button id="downloadProjectPlan">下载文件清单</button><span id="projectFileSelection"></span></div><div id="projectFileList" class="project-file-list"></div><label class="backup-option"><input type="checkbox" id="projectKeepLocal" checked><span><b>同时保留本地副本</b><small>首次停泊建议保留。取消勾选后，逐文件独立复核通过才释放对应实体。</small></span></label><p class="storage-note">U 盘在线时，Codex 仍通过原路径读素材；离线时原始素材暂时不可读。不要在素材停泊时编辑这些文件。</p><form method="dialog"><button value="cancel">关闭</button><button type="button" id="projectFilesDock" class="primary">停泊所选素材</button></form>';
-  document.body.append(dialog);
+  const section=document.createElement('div');section.className='content-switcher';section.id='projectStorage';
+  section.innerHTML='<div class="tabs"><button id="historyMode" class="active">任务历史</button><button id="fileMode">项目文件</button></div><div id="projectPicker" hidden><select id="storageProject" aria-label="选择项目"></select><button id="projectPlanButton">查看可停泊文件</button></div>';
+  $('#projects').before(section);
+  const dialog=document.createElement('div');dialog.id='projectFileView';dialog.className='project-file-view';dialog.hidden=true;
+  dialog.innerHTML='<h3 id="projectFileTitle">选择项目，查看可停泊文件</h3><div id="projectFileSummary"></div><div id="projectFileGroups" class="project-file-tools"></div><div class="project-file-tools"><button id="projectFilesSelectAll">全选候选文件</button><span id="projectFileSelection"></span></div><details id="fileDetails"><summary>查看文件清单</summary><div id="projectFileList" class="project-file-list"></div><div class="project-file-tools"><button id="projectFilesPrev">上一页</button><span id="projectFilePageLabel"></span><button id="projectFilesNext">下一页</button><button id="downloadProjectPlan">下载清单</button></div></details><p class="storage-note">原入口继续使用；外盘断开时，已停泊文件暂时不可读。工作文件与运行环境保留本机。</p>';
+  $('#projects').before(dialog);
+  const report=document.createElement('details');report.id='transferReport';report.hidden=true;report.innerHTML='<summary id="transferSummary"></summary><div id="transferDetails"></div>';$('#progressStage').after(report);
   const management=document.createElement('section');management.id='parkedProjectFiles';management.innerHTML='<details><summary id="parkedProjectSummary">已停泊素材</summary><p class="storage-note">这里管理由新版项目停泊生成、具有校验记录的素材。</p><div id="parkedProjectList" class="project-file-list"></div><div class="project-file-tools"><button id="restoreProjectFiles">恢复所选素材到本机</button><button id="releaseProjectFiles">释放所选素材本地副本</button></div></details>';
-  $('#projectFileList').after(management);
+  dialog.append(management);
   $('#projectPlanButton').onclick=showProjectPlan;
-  $('#projectShortcut').onclick=showProjectPlan;
-  const paging=document.createElement('div');paging.className='project-file-tools';paging.innerHTML='<button id="projectFilesPrev">上一页</button><span id="projectFilePageLabel"></span><button id="projectFilesNext">下一页</button>';
-  $('#projectFileList').after(paging);const groupControls=document.createElement('div');groupControls.id='projectFileGroups';groupControls.className='project-file-tools';$('#projectFileList').before(groupControls);
+  $('#projectShortcut').onclick=()=>{setContentMode('files');$('#projectStorage').scrollIntoView({behavior:'smooth',block:'start'})};
+  $('#historyMode').onclick=()=>setContentMode('history');$('#fileMode').onclick=()=>setContentMode('files');
+  $('#storageProject').onchange=()=>{selectedProjectFiles.clear();selectedParkedProjectFiles.clear();projectFilePlan=null;projectFilePage=0;$('#projectFileSummary').innerHTML='';$('#projectFileTitle').textContent='点击查看可停泊文件';$('#projectFileGroups').innerHTML='';$('#projectFileList').innerHTML='';$('#parkedProjectList').innerHTML='';$('#projectFileSelection').textContent='';$('#parkedProjectSummary').textContent='已停泊素材';$('#restoreProjectFiles').disabled=$('#releaseProjectFiles').disabled=true;renderHero();renderProjectStorage();updateSelection()};
   $('#projectFilesSelectAll').onclick=()=>{const rows=projectFilePlan?.files.files||[];if(rows.length&&rows.every(row=>selectedProjectFiles.has(row.source)))selectedProjectFiles.clear();else for(const row of rows)selectedProjectFiles.add(row.source);renderProjectFileList()};
   $('#projectFilesPrev').onclick=()=>{projectFilePage--;renderProjectFileList()};$('#projectFilesNext').onclick=()=>{projectFilePage++;renderProjectFileList()};
   $('#downloadProjectPlan').onclick=()=>{if(!projectFilePlan)return;const blob=new Blob([JSON.stringify(projectFilePlan.files,null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download='memory-harbor-project-files.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000)};
-  $('#projectFilesDock').onclick=dockProjectFiles;
   $('#restoreProjectFiles').onclick=()=>manageProjectFiles('restore');$('#releaseProjectFiles').onclick=()=>manageProjectFiles('release');
+}
+function setContentMode(mode){
+  if(operationBusy)return;contentMode=mode;const files=mode==='files';
+  $('#projects').hidden=files;$('#projectFileView').hidden=!files;$('#projectPicker').hidden=!files;
+  $('#projects').closest('.panel').querySelector('.panel-head .panel-tools').hidden=files;
+  $('#historyMode').classList.toggle('active',!files);$('#fileMode').classList.toggle('active',files);
+  renderHero();
+}
+function renderHero(){
+  const kicker=document.querySelector('.hero .kicker');
+  if(contentMode==='files'){
+    kicker.textContent='可停泊的项目文件';$('#eligible').textContent=projectFilePlan?fmt(projectFilePlan.files.total_bytes):'—';
+    $('#heroText').textContent=projectFilePlan?`${projectFilePlan.project.name} · ${projectFilePlan.files.count} 个候选文件；已停泊任务历史 ${fmt(projectFilePlan.history.docked_bytes)}，两部分不重复累计。`:'选择项目并查看候选文件，确认前不会移动任何内容。';
+  }else if(data){
+    const totals=data.totals;kicker.textContent='新增可停泊的任务历史';$('#eligible').textContent=totals.eligible_h;
+    $('#heroText').textContent=(totals.eligible_files?`${totals.eligible_files} 段已经完成的历史符合安全条件。`:'今天没有新增可停泊历史。')+'这里不含已停泊历史，也不含项目视频、图片等大素材；素材请切换项目文件。';
+  }
 }
 function renderProjectStorage(){
   const select=$('#storageProject');if(!select)return;const previous=select.value;
@@ -290,6 +317,9 @@ function renderProjectStorage(){
   if([...select.options].some(option=>option.value===previous))select.value=previous;
   $('#projectPlanButton').disabled=operationBusy||!select.options.length;
   $('#projectShortcut').disabled=operationBusy||!select.options.length;
+  $('#historyMode').disabled=$('#fileMode').disabled=select.disabled=operationBusy;
+  document.querySelectorAll('[data-project-file],[data-project-file-group],#projectFilesSelectAll,#downloadProjectPlan').forEach(control=>control.disabled=operationBusy||!projectFilePlan);
+  $('#projectFilesSelectAll').disabled=operationBusy||!projectFilePlan?.files.files.length;
 }
 async function showProjectPlan(){
   if(operationBusy)return;const button=$('#projectPlanButton');button.disabled=true;button.textContent='正在盘点项目…';
@@ -298,17 +328,17 @@ async function showProjectPlan(){
     const response=await post('/api/project-plan',{project_id:$('#storageProject').value,volume:$('#volume').value});projectFilePlan=response.plan;projectFilePage=0;selectedProjectFiles.clear();selectedParkedProjectFiles.clear();
     const {project,files,history}=projectFilePlan;
     $('#projectFileTitle').textContent=project.name;
-    $('#projectFileSummary').innerHTML=`<p>原入口继续使用：<code>${esc(files.project_root)}</code></p><div class="storage-metrics"><article><span>本机候选素材</span><b>${fmt(files.total_bytes)}</b><small>${files.count} 个文件 · 尚未停泊</small></article><article><span>已停泊任务历史</span><b>${fmt(history.docked_bytes)}</b><small>${history.docked} / ${history.total} 项 · ${history.docked_online} 项在线</small></article></div><p>素材和历史是两部分，不重复累计。历史仍在本机 ${fmt(history.local_bytes)}，其中 ${history.eligible} 项可停泊。</p><p>素材存到 ${esc(projectFilePlan.volume.name)}；项目目录、说明文档、脚本和运行环境继续留在本机。</p><details><summary>为什么有些内容保留在本机？</summary><ul>${files.retained.map(row=>`<li>${esc(row.label)}：${row.count} 个文件</li>`).join('')}<li>本机运行环境：${files.skipped_local_directories} 个目录</li>${history.retained.map(row=>`<li>历史 · ${esc(row.label)}：${row.count} 项</li>`).join('')}</ul><p>历史任务仍在下方“你的历史”列表停泊。主任务与未完成记录继续受保护。</p></details>`;
-    $('#projectKeepLocal').checked=true;renderProjectFileList();$('#projectFileDialog').showModal();
-  }catch(error){toast(error.message,true)}finally{button.disabled=false;button.textContent='查看项目存储方案'}
+    $('#projectFileSummary').innerHTML=`<p class="file-capacity"><b>可停泊文件 ${fmt(files.total_bytes)}</b><span>${files.count} 个文件</span><span>已停泊任务历史 ${fmt(history.docked_bytes)}</span></p><details><summary>为什么有些内容保留在本机？</summary><p>原入口：<code>${esc(files.project_root)}</code>；${history.docked} 项历史已停泊，其中 ${history.docked_online} 项在线。</p><ul>${files.retained.map(row=>`<li>${esc(row.label)}：${row.count} 个文件</li>`).join('')}<li>本机运行环境：${files.skipped_local_directories} 个目录</li>${history.retained.map(row=>`<li>历史 · ${esc(row.label)}：${row.count} 项</li>`).join('')}</ul></details>`;
+    setContentMode('files');renderProjectFileList();
+  }catch(error){toast(error.message,true)}finally{renderProjectStorage();button.textContent='查看可停泊文件'}
 }
 function renderProjectFileList(){
   const rows=projectFilePlan?.files.files||[];
   projectFilePage=Math.max(0,Math.min(projectFilePage,Math.ceil(rows.length/100)-1));const page=rows.slice(projectFilePage*100,projectFilePage*100+100);
   $('#projectFileList').innerHTML=rows.length?page.map(row=>`<label class="project-file-row"><input type="checkbox" data-project-file="${esc(row.source)}" ${selectedProjectFiles.has(row.source)?'checked':''}><span title="${esc(row.relative)}">${esc(row.relative)}</span><b>${fmt(row.bytes)}</b></label>`).join(''):'<p class="empty">目前没有可以停泊的素材。展开说明查看保留原因。</p>';
   $('#projectFilePageLabel').textContent=`${rows.length?projectFilePage+1:0} / ${Math.ceil(rows.length/100)} 页 · 共 ${rows.length} 个文件`;$('#projectFilesPrev').disabled=projectFilePage<=0;$('#projectFilesNext').disabled=(projectFilePage+1)*100>=rows.length;
-  $('#projectFilesSelectAll').textContent=rows.length&&rows.every(row=>selectedProjectFiles.has(row.source))?'取消全部候选素材':'全选候选素材';
-  $('#projectFileGroups').innerHTML=(projectFilePlan?.files.groups||[]).filter(group=>group.candidate_count).map(group=>`<button type="button" data-project-file-group="${esc(group.name)}">${esc(group.name)} · ${fmt(group.candidate_bytes)}</button>`).join('');
+  $('#projectFilesSelectAll').textContent=rows.length&&rows.every(row=>selectedProjectFiles.has(row.source))?'取消全部选择':'全选候选文件';
+  $('#projectFileGroups').innerHTML=(projectFilePlan?.files.groups||[]).filter(group=>group.candidate_count).map(group=>`<button type="button" class="${rows.filter(row=>row.group===group.name).every(row=>selectedProjectFiles.has(row.source))?'active':''}" data-project-file-group="${esc(group.name)}">${esc(group.name)} · ${fmt(group.candidate_bytes)}</button>`).join('');
   document.querySelectorAll('[data-project-file-group]').forEach(button=>button.onclick=()=>{const members=rows.filter(row=>row.group===button.dataset.projectFileGroup),all=members.every(row=>selectedProjectFiles.has(row.source));for(const row of members)all?selectedProjectFiles.delete(row.source):selectedProjectFiles.add(row.source);renderProjectFileList()});
   document.querySelectorAll('[data-project-file]').forEach(control=>control.onchange=()=>{control.checked?selectedProjectFiles.add(control.dataset.projectFile):selectedProjectFiles.delete(control.dataset.projectFile);updateProjectFileSelection()});updateProjectFileSelection();
   const parked=projectFilePlan?.files.parked_files||[];$('#parkedProjectSummary').textContent=`现有素材链接 · ${parked.length} 个`;
@@ -318,30 +348,18 @@ function renderProjectFileList(){
 }
 function updateProjectFileSelection(){
   const rows=(projectFilePlan?.files.files||[]).filter(row=>selectedProjectFiles.has(row.source));
-  $('#projectFileSelection').textContent=`已选 ${rows.length} 个 · ${fmt(rows.reduce((sum,row)=>sum+row.bytes,0))}`;$('#projectFilesDock').disabled=operationBusy||!rows.length;
-}
-async function dockProjectFiles(){
-  if(operationBusy||!projectFilePlan)return;
-  const frozen=projectFilePlan,rows=frozen.files.files.filter(row=>selectedProjectFiles.has(row.source)),keepLocal=$('#projectKeepLocal').checked;
-  if(!rows.length)return;operationBusy=true;$('#projectFileDialog').close();updateSelection();renderProjectStorage();
-  try{
-    if(!await ask('确认停泊项目素材',`<p>将停泊 ${rows.length} 个素材，共 ${fmt(rows.reduce((sum,row)=>sum+row.bytes,0))}，存到 ${esc(frozen.volume.name)}。</p><p>原入口和文件路径保留。${keepLocal?'本机副本继续保留，本次不释放对应空间。':'独立复核通过后释放对应本机实体。'}</p>`))return;
-    const total=rows.reduce((sum,row)=>sum+row.bytes,0);let completed=0,bytes=0;$('#progressClose').disabled=true;$('#progressTitle').textContent='正在停泊项目素材';setProgress(0,rows.length,0,total,'准备逐文件复制与校验…');$('#progressDialog').showModal();
-    try{
-      for(const row of rows){setProgress(completed,rows.length,bytes,total,row.relative);await post('/api/project-file-offload',{plan_id:frozen.plan_id,path:row.source,volume:frozen.volume.path,keep_local:keepLocal,confirmation:'DOCK PROJECT FILE'});completed++;bytes+=row.bytes}
-      setProgress(completed,rows.length,bytes,total,keepLocal?'素材已停泊，本地副本已保留':'素材已停泊，对应本地空间已释放');toast('项目素材停泊完成，原路径继续可用');await refresh();
-    }catch(error){$('#progressTitle').textContent='停泊已停止';setProgress(completed,rows.length,bytes,total,`已完成 ${completed} 项；${error.message}`);toast(error.message,true)}finally{$('#progressClose').disabled=false}
-  }finally{operationBusy=false;updateSelection();renderProjectStorage()}
+  $('#projectFileSelection').textContent=`已选 ${rows.length} 个 · ${fmt(rows.reduce((sum,row)=>sum+row.bytes,0))}`;updateSelection();
 }
 async function manageProjectFiles(action){
   if(operationBusy||!projectFilePlan||!selectedParkedProjectFiles.size)return;
-  const frozen=projectFilePlan,paths=[...selectedParkedProjectFiles],restore=action==='restore';operationBusy=true;$('#projectFileDialog').close();renderProjectStorage();
+  const frozen=projectFilePlan,paths=[...selectedParkedProjectFiles],restore=action==='restore';let success=false;operationBusy=true;renderProjectStorage();
   try{
     if(!await ask(restore?'恢复项目素材':'释放项目素材本地副本',`<p>处理 ${paths.length} 个所选素材。${restore?'校验外部实体后恢复为本机普通文件，外部副本保留。':'重新核对外部实体、校验记录和本地副本，全部一致后才释放对应副本。'}</p>`))return;
-    $('#progressClose').disabled=true;$('#progressTitle').textContent=restore?'正在恢复项目素材':'正在释放本地副本';$('#progressDialog').showModal();let count=0;setProgress(0,paths.length,0,0,'准备校验…');
+    $('#transferReport').hidden=true;$('#progressClose').disabled=true;$('#progressTitle').textContent=restore?'正在恢复项目素材':'正在释放本地副本';$('#progressDialog').showModal();let count=0;setProgress(0,paths.length,0,0,'准备校验…');
     try{
       for(const path of paths){await post(restore?'/api/project-file-restore':'/api/project-file-offload',{plan_id:frozen.plan_id,path,volume:frozen.volume.path,keep_local:false,confirmation:restore?'RESTORE PROJECT FILE':'DOCK PROJECT FILE'});count++;setProgress(count,paths.length,0,0,path.split('/').pop())}
-      $('#progressStage').textContent=restore?'所选素材已恢复到本机':'所选素材本地副本已处理';toast('处理完成');await refresh();
+      $('#progressTitle').textContent=restore?'恢复完成':'副本处理完成';$('#progressStage').textContent=restore?'所选素材已恢复到本机':'所选素材本地副本已处理';toast('处理完成');success=true;await refresh();
     }catch(error){$('#progressTitle').textContent='处理已停止';$('#progressStage').textContent=`已完成 ${count} 项；${error.message}`;toast(error.message,true)}finally{$('#progressClose').disabled=false}
   }finally{operationBusy=false;updateSelection();renderProjectStorage()}
+  if(success)await showProjectPlan();
 }
