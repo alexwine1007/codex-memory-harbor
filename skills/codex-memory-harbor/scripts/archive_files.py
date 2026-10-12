@@ -171,6 +171,7 @@ def _existing(item, check_volume, check_handles, keep_local):
             or target.stat().st_size != record['bytes'] or digest(source) != record['sha256']
             or identity.get('volume_uuid') and record.get('volume_uuid') != identity['volume_uuid']):
         raise RuntimeError('已有链接缺少匹配的校验记录')
+    released_bytes = 0
     if rollback.exists() and not keep_local:
         if rollback.is_symlink():
             raise RuntimeError('回滚副本不是本机普通文件，停止释放')
@@ -180,8 +181,9 @@ def _existing(item, check_volume, check_handles, keep_local):
                 or digest(target) != record['sha256']):
             raise RuntimeError('释放前内容发生变化，保留本地文件')
         rollback.unlink(); durable_directory(source.parent)
+        released_bytes = record['bytes']
         _write(item, dict(record, status='local_entity_released'))
-    return dict(record, status='already_verified')
+    return dict(record, status='already_verified', released_bytes=released_bytes)
 
 
 def archive_batch(items, check_volume, check_handles=no_open_handles, keep_local=False, progress=None):
@@ -297,10 +299,10 @@ def archive_batch(items, check_volume, check_handles=no_open_handles, keep_local
                             raise RuntimeError('释放前内容发生变化，保留本地文件')
                         if not keep_local:
                             rollback.unlink(); released.add(str(source)); durable_directory(source.parent)
-                            results.append(dict(record, status='local_entity_released'))
+                            results.append(dict(record, status='local_entity_released', released_bytes=record['bytes']))
                             _write(item, dict(record, status='local_entity_released'))
                         else:
-                            results.append(dict(record, status='verified_with_local_backup'))
+                            results.append(dict(record, status='verified_with_local_backup', released_bytes=0))
                         released.add(str(source))  # A completed retained-backup transaction stays committed too.
             except BaseException:
                 for item in reversed(changed):
@@ -330,6 +332,7 @@ def archive_batch(items, check_volume, check_handles=no_open_handles, keep_local
     elapsed = time.perf_counter()-started
     metrics = dict(elapsed_seconds=elapsed, stage_seconds=timings, bytes=total_bytes,
                    copied_bytes=copied_bytes, verified_bytes=sum(row['bytes'] for row in results),
+                   released_bytes=sum(row.get('released_bytes', 0) for row in results),
                    files=len(results), mib_per_second=total_bytes/max(elapsed, 0.000001)/1048576,
                    efficiency=None, efficiency_note='未标定物理路径上限；此数值不是硬件效率')
     if progress:

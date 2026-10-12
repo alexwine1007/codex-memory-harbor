@@ -1529,7 +1529,7 @@ def start_parking(app, data):
                 metrics = result['metrics']; metrics['adapter_seconds'] = prepared
                 metrics['end_to_end_seconds'] = time.perf_counter()-tick
                 job.update(status='complete', metrics=metrics, completed=len(result['results']),
-                           bytes=metrics['verified_bytes'])
+                           bytes=metrics['verified_bytes'], released_bytes=metrics['released_bytes'])
                 app['cache'] = None
         except Exception as exc:
             if isinstance(exc, RuntimeError):

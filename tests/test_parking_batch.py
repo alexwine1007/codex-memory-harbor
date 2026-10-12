@@ -34,6 +34,22 @@ class BatchTests(unittest.TestCase):
             self.assertFalse(source.is_symlink())
             self.assertEqual(source.read_bytes(), self.originals[source])
 
+    def test_verified_bytes_do_not_overclaim_release_on_retention_or_retry(self):
+        total = sum(len(content) for content in self.originals.values())
+        retained = self.run_batch(keep_local=True)
+        self.assertEqual(retained['metrics']['verified_bytes'], total)
+        self.assertEqual(retained['metrics']['released_bytes'], 0)
+        released = self.run_batch(keep_local=False)
+        self.assertEqual(released['metrics']['released_bytes'], total)
+        retry = self.run_batch(keep_local=False)
+        self.assertEqual(retry['metrics']['verified_bytes'], total)
+        self.assertEqual(retry['metrics']['released_bytes'], 0)
+
+    def test_new_migration_reports_only_local_files_actually_removed(self):
+        result = self.run_batch()
+        self.assertEqual(result['metrics']['released_bytes'], sum(len(content) for content in self.originals.values()))
+        self.assertTrue(all(row['released_bytes'] == row['bytes'] for row in result['results']))
+
     def test_every_path_uses_three_fresh_batched_handle_checks_and_independent_hashes(self):
         with mock.patch.object(archive.subprocess, 'run', return_value=mock.Mock(returncode=1, stdout=b'', stderr=b'')) as check, \
              mock.patch.object(archive, 'digest', wraps=archive.digest) as hashes, \

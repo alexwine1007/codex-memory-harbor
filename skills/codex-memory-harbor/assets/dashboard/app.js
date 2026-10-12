@@ -225,7 +225,11 @@ async function prepareMigration(items,title='停泊所选历史'){
   }finally{operationBusy=false;updateSelection();renderProjectStorage()}
   if(success&&hadFiles)await showProjectPlan();
 }
-function setProgress(completed,total,bytes,totalBytes,stage){$('#progressCount').textContent=`${completed} / ${total}`;$('#progressBytes').textContent=`${fmt(bytes)} / ${fmt(totalBytes)}`;$('#progressFill').style.width=(total?completed/total*100:0)+'%';$('#progressStage').textContent=stage}
+function setProgress(completed,total,bytes,totalBytes,stage,status='running'){
+  const state=HarborProgress.state({completed,total,bytes,status},fmt);
+  $('#progressCount').textContent=`${state.completed} / ${state.total}`;$('#progressBytes').textContent=`${fmt(bytes)} / ${fmt(totalBytes)}`;
+  $('#progressFill').value=state.percent;$('#progressFill').setAttribute('aria-valuetext',`${Math.round(state.percent)}%，已验证 ${state.completed} 项`);$('#progressStage').textContent=stage;
+}
 async function executeMigration(plan,{keepLocalBackup=false}={}){
   const dialog=$('#progressDialog');$('#progressClose').disabled=true;$('#progressTitle').textContent='正在安全停泊';setProgress(0,plan.count,0,plan.bytes,'准备复制与校验…');$('#transferReport').hidden=true;dialog.showModal();
   const phases={waiting:'等待当前操作完成',admission:'检查文件是否仍在使用',copy_flush:'复制与持久化写入',target_verify:'回读校验外盘副本',link_verify_receipt:'验证原路径与回滚副本',release_verify:'释放前独立复核',retry_verify:'验证已有停泊记录',complete:'全部验证完成'};
@@ -234,14 +238,15 @@ async function executeMigration(plan,{keepLocalBackup=false}={}){
     let job;
     do{
       const result=await fetch('/api/parking-job?'+new URLSearchParams({id:response.job_id}));if(!result.ok)throw Error('无法读取批次进度，请先检查已保存的回执');job=await result.json();
-      setProgress(job.completed,job.total,job.bytes,job.total_bytes,phases[job.phase]||'正在验证');
+      setProgress(job.completed,job.total,job.bytes,job.total_bytes,phases[job.phase]||'正在验证',job.status);
       if(job.status==='failed')throw Error(job.error);
       if(job.status==='running')await new Promise(resolve=>setTimeout(resolve,700));
     }while(job.status==='running');
-    const metrics=job.metrics,elapsed=metrics.end_to_end_seconds||metrics.elapsed_seconds;
-    $('#progressTitle').textContent='停泊完成';$('#progressStage').textContent=keepLocalBackup?'原路径已验证，本地副本已保留。':`已验证并释放 ${fmt(job.bytes)}；外盘在线时原入口继续使用。`;
-    const rate=job.bytes/Math.max(elapsed,.001);$('#transferReport').hidden=false;$('#transferSummary').textContent=`${elapsed.toFixed(1)} 秒 · ${rate>=1048576?`安全流水线平均 ${(rate/1048576).toFixed(1)} MiB/s`:`${job.completed} 项已验证`}`;
-    $('#transferDetails').innerHTML=Object.entries(metrics.stage_seconds).map(([key,seconds])=>`<p>${esc(phases[key]||key)}：${seconds.toFixed(2)} 秒</p>`).join('')+'<p>未标定物理路径上限，不据此宣称硬件效率达标。</p>';
+    const state=HarborProgress.state(job,fmt);if(!state.complete)throw Error('批次尚未完整结束，请查看回执');
+    $('#progressTitle').textContent=state.title;$('#progressStage').textContent=state.detail;
+    const metrics=job.metrics||{},elapsed=metrics.end_to_end_seconds||metrics.elapsed_seconds||0;
+    const rate=job.bytes/Math.max(elapsed,.001);$('#transferReport').hidden=false;$('#transferSummary').textContent='查看处理详情';
+    $('#transferDetails').innerHTML=`<p>用时 ${elapsed.toFixed(1)} 秒 · 平均 ${(rate/1048576).toFixed(1)} MiB/s</p>`+Object.entries(metrics.stage_seconds||{}).map(([key,seconds])=>`<p>${esc(phases[key]||key)}：${seconds.toFixed(2)} 秒</p>`).join('')+'<p>容量按文件字节统计，不等同于系统可用空间的净增量。外盘在线时原路径可读；本次没有证明离线或继续研发能力。</p>';
     selected.clear();selectedProjectFiles.clear();recommended.clear();await refresh();return true;
   }catch(error){$('#progressTitle').textContent='操作已停止';$('#progressStage').textContent=`${error.message}；未通过校验的内容不会释放本地实体。`;toast(error.message,true);return false}
   finally{$('#progressClose').disabled=false}
@@ -358,7 +363,7 @@ async function manageProjectFiles(action){
     $('#transferReport').hidden=true;$('#progressClose').disabled=true;$('#progressTitle').textContent=restore?'正在恢复项目素材':'正在释放本地副本';$('#progressDialog').showModal();let count=0;setProgress(0,paths.length,0,0,'准备校验…');
     try{
       for(const path of paths){await post(restore?'/api/project-file-restore':'/api/project-file-offload',{plan_id:frozen.plan_id,path,volume:frozen.volume.path,keep_local:false,confirmation:restore?'RESTORE PROJECT FILE':'DOCK PROJECT FILE'});count++;setProgress(count,paths.length,0,0,path.split('/').pop())}
-      $('#progressTitle').textContent=restore?'恢复完成':'副本处理完成';$('#progressStage').textContent=restore?'所选素材已恢复到本机':'所选素材本地副本已处理';toast('处理完成');success=true;await refresh();
+      setProgress(count,paths.length,0,0,restore?'所选素材已恢复到本机':'所选素材本地副本已处理','complete');$('#progressTitle').textContent=restore?'恢复完成':'副本处理完成';toast('处理完成');success=true;await refresh();
     }catch(error){$('#progressTitle').textContent='处理已停止';$('#progressStage').textContent=`已完成 ${count} 项；${error.message}`;toast(error.message,true)}finally{$('#progressClose').disabled=false}
   }finally{operationBusy=false;updateSelection();renderProjectStorage()}
   if(success)await showProjectPlan();
