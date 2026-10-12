@@ -6,34 +6,26 @@
   <div class="preview-bar"><span>设计预览 · 所有数字均为样例，不操作真实文件</span><div><button id="theme" aria-label="切换浅色深色">浅色</button><button id="desktop" aria-pressed="false">桌面卡片</button></div></div>
   <main class="shell glass" id="app">
     <header>
-      <a class="brand" href="#harbor"><img src="../../../skills/codex-memory-harbor/assets/dashboard/memory-harbor-logo-v4.png" alt=""><span>Memory Harbor<small>记忆港</small></span></a>
-      <nav aria-label="主导航"><button data-page="harbor" aria-current="page">港湾</button><button data-page="recall">找回记忆</button><button data-page="dock">停泊</button></nav>
+      <a class="brand" href="#workspace"><img src="../../../skills/codex-memory-harbor/assets/dashboard/memory-harbor-logo-v4.png" alt=""><span>Memory Harbor<small>记忆港</small></span></a>
+      <form id="searchForm" class="search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg><input id="query" aria-label="搜索内容与记忆" placeholder="查找项目、文件或过去的记录" autocomplete="off"><button id="clearSearch" type="button" aria-label="清除搜索" hidden>×</button><kbd>⌘ K</kbd></form>
       <button class="icon-button" id="settings" aria-label="设备与设置"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg></button>
     </header>
-    <section id="harbor" class="page">
-      <div class="hero"><span class="status"><i></i><span id="connection">外置盘已连接</span></span><h1>给现在，<br>留一点空间。</h1><p>把暂时用不到的内容安放好。<br>需要时，仍能沿原来的路径找到。</p><button class="primary" data-page="dock">查看停泊方案 <span>↗</span></button></div>
-      <div class="space-summary"><div><span>本机可用</span><strong>24.3 <small>GB</small></strong><div class="capacity-track"><i></i></div></div><div><span>建议停泊</span><strong>26.4 <small>GB</small></strong><p>已排除正在使用和长期保留的内容</p></div></div>
-      <footer class="home-footer"><span><i class="dot"></i> Alex’s Disk <small>· 891 GB 可用</small></span><button id="proof">查看检查范围 <span>→</span></button></footer>
-    </section>
-    <section id="recall" class="page" hidden>
-      <div class="page-title"><span class="eyebrow">找回记忆</span><h1>还记得哪一部分？</h1><p>说说项目、决定，或当时在做的事。</p></div>
-      <form id="searchForm" class="search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg><input id="query" aria-label="搜索记忆" placeholder="例如：之前的视频剪辑工具" autocomplete="off"><button type="submit">找回</button></form>
-      <div class="results" id="results"></div><p class="empty" id="empty" hidden>暂时没有贴近的线索，换一种说法试试。</p>
-      <p class="footnote">这里只演示查找交互。正式版的每条线索都需要原始出处。</p>
-    </section>
-    <section id="dock" class="page" hidden>
-      <div class="page-title"><span class="eyebrow">安全停泊</span><h1>把这些先安放好。</h1><p>你来选择；复制和校验通过后，才处理本机副本。</p></div>
-      <div class="list-header"><span>本次建议 <small>3 个项目</small></span><button id="selectAll">取消全选</button></div>
+    <section class="workspace-meta"><span>本机可用 <b>24.3 GB</b></span><button id="storageStatus"><i class="dot"></i><span id="connection">Alex’s Disk · 已连接</span><span class="storage-arrow">⌄</span></button></section>
+    <section id="workspace" class="workspace">
+      <div id="candidates">
+      <div class="list-header"><div><h1>建议停泊</h1><span>3 项 · 26.4 GB</span></div><button id="selectAll">取消全选</button></div>
       <div class="project-list">
         <details class="project" open><summary><span class="project-symbol">◫</span><span>影像制作<small>旧素材 · 31 天未使用</small></span><b>18.2 GB</b><span class="disclosure">⌄</span></summary><label><input type="checkbox" data-size="18.2" checked><span>已完成的分镜视频<small>保留最终成片与工作文件</small></span><b>18.2 GB</b></label></details>
         <details class="project"><summary><span class="project-symbol">⌘</span><span>研发记录<small>已完成的测试资料</small></span><b>7.3 GB</b><span class="disclosure">⌄</span></summary><label><input type="checkbox" data-size="7.3" checked><span>历史测试副本<small>当前代码、环境和数据库不动</small></span><b>7.3 GB</b></label></details>
         <details class="project"><summary><span class="project-symbol">◷</span><span>独立任务<small>不在项目中的已完成子任务</small></span><b>0.9 GB</b><span class="disclosure">⌄</span></summary><label><input type="checkbox" data-size="0.9" checked><span>较早的子任务历史<small>保留原始证据与可追溯入口</small></span><b>0.9 GB</b></label></details>
       </div>
-      <div class="dock-action"><span><strong id="selection">26.4 GB</strong><small>存放到 Alex’s Disk</small></span><button class="primary" id="review">查看停泊方案 <span>→</span></button></div>
+      </div>
+      <div id="searchView" hidden><div class="list-header"><div><h1>查找结果</h1><span id="resultCount"></span></div><button id="backToList">返回列表</button></div><div class="results" id="results"></div><p class="empty" id="empty" hidden>没有找到，换一种说法试试。</p></div>
     </section>
+    <footer class="dock-action" id="selectionBar"><span><strong id="selection">已选 3 项 · 26.4 GB</strong><small>先看方案，确认后才开始迁移</small></span><button class="primary" id="review">查看停泊方案 <span>→</span></button></footer>
   </main>
   <section class="desktop-stage" id="desktopStage" hidden>
-    <article class="desktop-card glass"><div class="card-top"><img src="../../../skills/codex-memory-harbor/assets/dashboard/memory-harbor-logo-v4.png" alt=""><span>记忆港<small id="cardStatus">外置盘已连接</small></span></div><span class="card-label">本机可用空间</span><strong class="card-number">24.3 <small>GB</small></strong><p id="cardNote">有 26.4 GB 可以查看停泊方案</p><div class="card-bottom"><span><i class="dot"></i>Alex’s Disk</span><button class="primary" id="openApp">打开港湾 ↗</button></div></article>
+    <article class="desktop-card glass"><div class="card-top"><img src="../../../skills/codex-memory-harbor/assets/dashboard/memory-harbor-logo-v4.png" alt=""><span>记忆港<small id="cardStatus">外置盘已连接</small></span></div><span class="card-label">本机可用空间</span><strong class="card-number">24.3 <small>GB</small></strong><p id="cardNote">有 26.4 GB 可以查看停泊方案</p><div class="card-bottom"><span><i class="dot"></i>Alex’s Disk</span><button class="primary" id="openApp">打开 ↗</button></div></article>
     <p class="desktop-caption">桌面外观示意<br><small>正式桌面版采用原生材质，不常驻网页或动画。</small></p>
   </section>
   <footer class="preview-tools"><details><summary>预览其他状态</summary><div><button data-scenario="online">已连接</button><button data-scenario="offline">外盘离线</button><button data-scenario="complete">停泊完成</button><button data-scenario="retained">保留本地副本</button><button data-scenario="stopped">安全停止</button></div></details></footer>

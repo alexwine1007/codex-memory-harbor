@@ -63,7 +63,9 @@ class HarborTests(unittest.TestCase):
         handbook = (REPO_ROOT / "docs/handbook/README.md").read_text(encoding="utf-8")
         desktop = (REPO_ROOT / "docs/handbook/desktop-and-dashboard.md").read_text(encoding="utf-8")
         self.assertIn("technical handbook", readme)
-        self.assertIn("状态：草案 0.3", foundation)
+        self.assertIn("状态：草案 0.4", foundation)
+        self.assertIn("单一工作台", foundation)
+        self.assertIn("不再作为当前布局要求", foundation)
         self.assertIn("未来记忆港", foundation)
         for page in ("港湾", "找回记忆", "安全停泊"):
             self.assertIn(page, foundation)
